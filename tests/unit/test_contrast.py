@@ -16,8 +16,7 @@ TEXT_PAIRS = [
     *[("alert_text", s) for s in SURFACES],
     *[("success_text", s) for s in SURFACES],
     *[("rest_text", s) for s in SURFACES],
-    ("on_accent", "accent_start"),
-    ("on_accent", "accent_end"),
+    ("on_accent", "accent"),
     ("on_success", "success"),
     ("on_duration_badge", "duration_badge"),
     ("success_text", "success_bg"),
@@ -31,17 +30,15 @@ TEXT_PAIRS = [
 
 # Rings, chart curve, focus outline, field borders, state dots: WCAG 1.4.11 needs 3:1.
 GRAPHIC_PAIRS = [
-    *[("ring_start", s) for s in (*SURFACES, "bg_track")],
-    *[("ring_end", s) for s in (*SURFACES, "bg_track")],
-    *[("focus_violet", s) for s in SURFACES],
+    *[("ring", s) for s in (*SURFACES, "bg_track")],
+    *[("live_dot", s) for s in SURFACES],
+    *[("accent", s) for s in ("bg_canvas", "bg_surface")],
+    *[("control_fill", s) for s in ("bg_canvas", "bg_surface")],
+    ("on_accent", "control_fill"),
+    ("nav_active_icon", "nav_active_bg"),
     *[("border_strong", s) for s in SURFACES],
     *[("accent_text", s) for s in (*SURFACES, "bg_track")],
 ]
-
-
-def blend(first: str, second: str) -> str:
-    channels = [(int(first[i : i + 2], 16) + int(second[i : i + 2], 16)) // 2 for i in (1, 3, 5)]
-    return "#" + "".join(f"{c:02X}" for c in channels)
 
 
 class ContrastMathTests(unittest.TestCase):
@@ -74,20 +71,22 @@ class ThemeContrastTests(unittest.TestCase):
     def test_design_surface_and_ink_values_match_the_specification(self):
         expected = {
             "light": {
-                "bg_canvas": "#FFFFFF",
-                "bg_surface": "#FAFAFF",
-                "text_primary": "#070417",
-                "text_secondary": "#4A475C",
-                "text_muted": "#5F5B73",
-                "accent_text": "#1D4ED8",
+                "bg_canvas": "#F4F4F7",
+                "bg_surface": "#FFFFFF",
+                "text_primary": "#141417",
+                "text_secondary": "#4D4D57",
+                "text_muted": "#62626C",
+                "accent": "#1F5FEA",
+                "accent_text": "#1A56DB",
             },
             "dark": {
-                "bg_canvas": "#070417",
-                "bg_surface": "#292639",
-                "text_primary": "#FFFFFF",
-                "text_secondary": "#C9C6D8",
-                "text_muted": "#A7A3BA",
-                "accent_text": "#A5B4FC",
+                "bg_canvas": "#000000",
+                "bg_surface": "#17171A",
+                "text_primary": "#F4F4F7",
+                "text_secondary": "#C2C2CC",
+                "text_muted": "#9E9EA8",
+                "accent": "#1F5FEA",
+                "accent_text": "#8AB4FF",
             },
         }
         for theme, values in expected.items():
@@ -108,11 +107,12 @@ class ThemeContrastTests(unittest.TestCase):
                 with self.subTest(theme=theme, pair=f"{foreground} on {background}"):
                     self.assertGreaterEqual(ratio, 3.0, f"{ratio:.2f}:1")
 
-    def test_button_text_stays_readable_across_the_whole_gradient(self):
+    def test_the_accent_is_one_flat_color_with_no_gradient_tokens(self):
         for theme, tokens in self.themes.items():
-            middle = blend(tokens["accent_start"], tokens["accent_end"])
             with self.subTest(theme=theme):
-                self.assertGreaterEqual(contrast_ratio(tokens["on_accent"], middle), 4.5)
+                self.assertFalse({"accent_start", "accent_end", "ring_start", "ring_end"} & set(tokens))
+        css = (styles_dir() / "base.css").read_text(encoding="utf-8")
+        self.assertNotIn("gradient", css)
 
     def test_ink_on_the_success_fill_is_dark_because_white_fails(self):
         for theme, tokens in self.themes.items():

@@ -1,83 +1,146 @@
+<div align="center">
+
+<img src="packaging/icons/hicolor/256x256/apps/org.productime.Productime.png" width="128" alt="Productime app icon">
+
 # Productime
 
-A native focus timer, alarm, stopwatch, and productivity report for Fedora Linux.
+**Focus targets, alarms that make you get up, timers with your own music, and a weekly report.**<br>
+An open source, native desktop app for Fedora Linux.
 
-Productime is written in Python with GTK 4, libadwaita, Cairo, GStreamer, and SQLite. It uses only
-libraries that ship with Fedora Workstation: there is no browser engine inside and nothing to
-`pip install`.
+[![Fedora](https://img.shields.io/badge/Fedora-44-51A2DA?logo=fedora&logoColor=white)](https://fedoraproject.org/workstation/)
+[![GNOME](https://img.shields.io/badge/GNOME-Wayland-4A86CF?logo=gnome&logoColor=white)](https://www.gnome.org/)
+[![Python](https://img.shields.io/badge/Python-3.14-3776AB?logo=python&logoColor=white)](https://www.python.org/)
+[![GTK](https://img.shields.io/badge/GTK_4-libadwaita-7FE719?logo=gtk&logoColor=black)](https://www.gtk.org/)
+[![GStreamer](https://img.shields.io/badge/GStreamer-audio-FF3131?logo=gstreamer&logoColor=white)](https://gstreamer.freedesktop.org/)
+[![SQLite](https://img.shields.io/badge/SQLite-WAL-003B57?logo=sqlite&logoColor=white)](https://www.sqlite.org/)
+<br>
+[![Open source](https://img.shields.io/badge/open_source-yes-0B6B45)](#open-source-and-license)
+[![License: MIT](https://img.shields.io/badge/license-MIT-1F5FEA)](LICENSE)
+[![CI](https://github.com/HikariReiziq/Productime/actions/workflows/ci.yml/badge.svg)](https://github.com/HikariReiziq/Productime/actions/workflows/ci.yml)
 
-## What it does
+<img src="docs/demo.gif" width="860" alt="Demo: planning a 6 hour target, starting a focus session, setting an alarm with a math mission, running the stopwatch, and reading the weekly report">
 
-- **Today / Target**: plan a time-blocked Pomodoro target (`25/5`, `50/10`, or custom), add a long
-  rest every N batches, and name one subtask per batch. A live vertical timeline shows every work
-  block and break before you save. While a target runs, a batch can only move to its break after
-  you check off its subtask. If the timer runs out first, the sound loops until you check it off
-  or snooze, and the snooze limit you chose is enforced.
-- **Alarm**: 12-hour time, repeat days, six bundled sounds or your own audio file, snooze interval
-  and limit, and an optional mission to stop it: type 1 to 3 phrases exactly (pasting is blocked)
-  or solve 1 to 3 math problems at Easy, Medium, or Hard.
-- **Stopwatch**: `Start / Lap`, `Pause / Lap`, `Resume / Clear`, with a table of the gap between
-  each lap and the change against the previous lap.
-- **Timer**: hours, minutes, and seconds with a name and a sound that loops when time is up.
-- **Report**: completed subtasks and focus time per day or week, a chart you can read with the
-  pointer or the arrow keys, and CSV or JSON export.
+</div>
 
-Light and dark themes are included. The window switches from a left rail to a bottom bar below
-900 px and stays usable down to 420 px wide.
+## Background and problem
 
-## Requirements
+Students and developers who move to Fedora for study and coding lean on the clock app all day, and
+GNOME Clocks falls short for long focus sessions:
 
-Fedora Workstation 44 or newer, with these packages (all part of a default GNOME install):
+- **No custom sounds.** Alarms and timers cannot play your own music or audio files.
+- **Easy to miss.** A finished timer chimes once and goes quiet, so it slips past while you are deep
+  in code or away from the desk.
+- **No link between time and work.** There are no Pomodoro batches, no long rests, no rule that a
+  task is done before the break, and no record of what you actually finished.
+- **Heavy alternatives.** Most focus apps are Electron or web apps that take hundreds of MB of RAM
+  next to an IDE, an Android emulator, and a browser.
+
+## Solution
+
+Productime puts five tools in one small native window:
+
+| Tool | What it does |
+|---|---|
+| **Today / Target** | Split a goal (say 6 hours) into Pomodoro batches (`25/5`, `50/10`, or custom) with a long rest every N batches. Give each batch one subtask and watch a live timeline (`6h` becomes `6h 40m` with rests). A batch moves to its break only after you check off its subtask, and the snooze limit is enforced. |
+| **Alarm** | Repeat days, your own sound looping until you act, snooze interval and limit, and one wake-up mission: type phrases exactly (pasting is blocked) or solve math at Easy, Medium, or Hard. |
+| **Stopwatch** | `Start / Lap`, `Pause / Lap`, `Resume / Clear`, with the gap between laps and the change against the previous lap. |
+| **Timer** | Hours, minutes, and seconds with your own music that loops until you stop it. |
+| **Report** | Completed subtasks and focus time per day or week, an interactive chart, and CSV or JSON export. |
+
+Creating or editing an item opens a full page beside the navigation rail, the way a phone clock app
+does. Details such as snooze, missions, long rests, and custom categories open small sheets with
+Cancel and Save. Icons carry the meaning, and hovering any of them shows what it does.
+
+## Screenshots
+
+| Today | Create Target |
+|---|---|
+| ![Today view with planned targets](docs/screenshots/today-light.png) | ![Create Target page with the live batch timeline](docs/screenshots/create-target-light.png) |
+| **Focus session (dark)** | **Weekly report** |
+| ![Focus session with the countdown ring and batch timeline](docs/screenshots/focus-dark.png) | ![Weekly productivity report with chart](docs/screenshots/report-light.png) |
+| **New Alarm** | **Wake-up mission (dark)** |
+| ![New Alarm page with repeat days and the mission slot](docs/screenshots/new-alarm-light.png) | ![Mission sheet with count and difficulty tiles](docs/screenshots/mission-sheet-dark.png) |
+| **Snooze** | **Stopwatch (dark)** |
+| ![Snooze sheet with interval and limit](docs/screenshots/snooze-sheet-light.png) | ![Stopwatch with lap gaps](docs/screenshots/stopwatch-dark.png) |
+| **Timer** | **Settings (dark)** |
+| ![Timers with a running countdown](docs/screenshots/timer-light.png) | ![Settings dialog](docs/screenshots/settings-dark.png) |
+| **Welcome** | **Narrow window, 420 px** |
+| ![First launch welcome](docs/screenshots/welcome-light.png) | ![New Alarm in light](docs/screenshots/compact-alarm-light.png) ![Create Target in dark](docs/screenshots/compact-target-dark.png) |
+
+## Tech stack
+
+| Layer | Technology | Why |
+|---|---|---|
+| Language | Python 3.14, standard library only | Ships with Fedora; nothing to `pip install` |
+| Interface | GTK 4 and libadwaita through PyGObject | Native GNOME look, adaptive from 420 px to wide screens |
+| Styling | GTK CSS with light and dark tokens | Both themes checked against WCAG AA by the tests |
+| Drawing | Cairo | Countdown ring, batch timeline, report chart |
+| Audio | GStreamer `playbin` | Seamless in-process looping, released when silent |
+| Storage | SQLite in WAL mode | One local file, parameterized queries only |
+| Desktop | Gio notifications, D-Bus, systemd-logind, XDG autostart | Notification buttons, Activities search, sleep-aware timers, start at login |
+| Quality | `unittest`, `ruff`, headless mutter session | 354 tests, including a UI suite that drives the real app |
+
+No browser engine, no Electron, no Node.
+
+## Benefits
+
+- **Light.** An idle window uses about 90 MB of RAM (`ps -o rss=` on Fedora 44), and nothing
+  repaints while it is hidden.
+- **Hard to miss.** Sounds loop until you respond, snooze has a limit, and a mission makes sure you
+  are awake before an alarm stops.
+- **Honest focus.** Breaks start only after you check off the subtask, and the report shows only
+  work you really finished.
+- **Private.** Everything stays in a local SQLite file. Back it up to JSON, restore it, or export the
+  report to CSV with spreadsheet formula protection.
+- **At home in GNOME.** Notification buttons, dock quick actions, Activities search, start at login,
+  and light and dark themes.
+- **Accessible.** Full keyboard use, tooltips and screen reader names on every icon, and AA contrast.
+
+## Get started
+
+You need Fedora Workstation 44 or newer. Everything below is part of a default GNOME install:
 
 ```bash
 sudo dnf install python3-gobject gtk4 libadwaita gstreamer1-plugins-good python3-cairo libnotify
 ```
 
-Python 3.14 or newer and libadwaita 1.7 or newer are required.
-
-## Run it
-
-From a checkout, without installing anything:
+Run it straight from a checkout:
 
 ```bash
+git clone https://github.com/HikariReiziq/Productime.git
+cd Productime
 ./scripts/run-dev.sh
 ```
 
-## Install the launcher
+Or install a launcher for the GNOME app grid. The installer never uses `sudo`:
 
 ```bash
-./scripts/install-local.sh
-```
-
-This copies the app to `~/.local/share/productime-app/`, writes `~/.local/bin/productime`, and adds
-a launcher and icon so Productime opens from the GNOME app grid without a terminal. It never uses
-`sudo`. To remove it again (your saved data is kept):
-
-```bash
-./scripts/install-local.sh --uninstall
+./scripts/install-local.sh              # install to ~/.local
+./scripts/install-local.sh --uninstall  # remove it again, your data is kept
 ```
 
 ## Your data
 
-Everything is saved automatically to a local SQLite database:
-
 ```
-~/.local/share/productime/productime.db      targets, subtasks, alarms, timers, report log
-~/.local/share/productime/sounds/            audio files you imported
+~/.local/share/productime/productime.db   targets, subtasks, alarms, timers, report log
+~/.local/share/productime/sounds/         audio files you imported
 ```
 
-The folder is readable only by you. From **Data & Backup** in the sidebar you can:
+The folder is readable only by you. **Settings > Data and Backup** saves everything to one `.json`
+file, restores it after a full check, or opens the folder. A backup holds your data but not imported
+audio files; a missing custom sound falls back to the default alarm.
 
-- **Save Backup**: write all targets, alarms, timers, and report entries to one `.json` file.
-- **Restore Backup**: replace the current data with a backup file. The file is fully checked
-  before anything is changed.
-- **Open Data Folder**: show the folder above in Files.
+## GNOME integration
 
-A backup holds your data but not the imported audio files themselves. If a restored item points
-to a custom sound that is not on this computer, it falls back to the default alarm sound.
+- **Notifications** carry buttons: Stop (or Open Mission) and Snooze for alarms, Stop and Restart for
+  timers, Check Off and Snooze 5 min for a finished batch. Snooze disappears once its limit is used.
+- **Start at login** starts Productime hidden; the window opens only when something needs you.
+- **Dock quick actions**: right-click the icon for New Target, New Alarm, New Timer, and Start
+  Stopwatch.
+- **Activities search**: type the name of a saved target or timer and start it from the result. Log
+  out and back in once after installing for the search provider to appear.
 
-Report exports protect spreadsheet users: cells that start with `=`, `+`, `-`, or `@` are written
-as plain text.
+Closing the window while something is running hides it instead of quitting; `Ctrl+Q` quits.
 
 ## Keyboard
 
@@ -86,30 +149,12 @@ as plain text.
 | `Ctrl+1` to `Ctrl+5` | Today, Alarm, Stopwatch, Timer, Report |
 | `Ctrl+N` | Create a target, alarm, or timer in the current view |
 | `Tab`, `Shift+Tab`, `Enter`, `Space` | Move between and activate controls |
-| `Escape` | Close a dialog |
+| `Escape` | Close a sheet, dialog, or Create page without saving |
 | `Left`, `Right`, `Home`, `End` | Read the points of the report chart |
 | `Ctrl+Q` | Quit |
 
-Pressing `Escape` on a ringing alarm, an expired timer, or a batch check-off does not silence it.
-The dialog collapses to a bar at the top of the window and the sound keeps looping until you
-deal with it.
-
-## Background behaviour
-
-Closing the window while a target, timer, or stopwatch is running, or while any alarm is enabled,
-hides the window and keeps Productime running. Open it again from the app grid to bring the
-window back. Use `Ctrl+Q` to quit completely.
-
-Alarms ring only while Productime is running. It does not start itself at login.
-
-## Memory use
-
-Productime sets the GTK renderer to Cairo by default, because this low-motion interface does not
-need GPU compositing and the Cairo renderer uses far less memory. Measured on Fedora 44 with
-`ps -o rss=`: an idle window uses about 84 to 87 MB. The audio pipeline is released whenever no
-sound is playing, and nothing repaints while the window is hidden.
-
-To use a GPU renderer instead, set `GSK_RENDERER` yourself, for example `GSK_RENDERER=ngl`.
+`Escape` never silences a ringing alarm, an expired timer, or a batch waiting for check-off. It
+collapses the alert to a bar at the top, and the sound keeps looping until you deal with it.
 
 ## Development
 
@@ -118,43 +163,30 @@ ruff check src tests scripts
 python3 scripts/check-emdash.py
 python3 -m unittest discover -s tests/unit -v
 python3 -m unittest discover -s tests/integration -v
-scripts/run-ui-tests.sh
+scripts/run-ui-tests.sh        # real GTK app in a private headless Wayland session
+scripts/build-fedora.sh        # source tarball, SHA256SUMS, and an RPM when rpmbuild is present
 ```
-
-The UI suite drives the real GTK application: real windows, real widgets, real GStreamer
-pipelines with a silent sink. `scripts/run-ui-tests.sh` runs it inside a private headless Wayland
-session, so no windows appear on your desktop. `python3 -m unittest discover -s tests/ui -v` runs
-the same suite on your current display.
-
-Layout of the source tree:
 
 ```
 src/productime/domain/     pure logic: timeline math, session state machine, missions, validation
 src/productime/db/         SQLite schema and parameterized queries
-src/productime/services/   audio, scheduler, notifications, backup and export
-src/productime/ui/         GTK 4 / libadwaita window, views, and Cairo widgets
+src/productime/services/   audio, scheduler, notifications, backup, GNOME integration
+src/productime/ui/         GTK 4 / libadwaita window, pages, sheets, and Cairo widgets
 ```
-
-## Packaging
-
-```bash
-scripts/build-fedora.sh
-```
-
-This writes a source tarball and `SHA256SUMS` to `dist/`. If `rpmbuild` is installed
-(`sudo dnf install rpm-build`), it also builds a `noarch` RPM from `packaging/rpm/productime.spec`.
 
 ## Known limits
 
 - The interface is in English.
-- The typing mission accepts one character per key press. Input methods that commit several
+- The style follows One UI conventions; Samsung's own font is not included.
+- The typing mission accepts one character per key press, so input methods that commit several
   characters at once are treated like a paste.
-- A system clock that is set forward by hand while a countdown runs is treated like time spent
-  asleep, so the countdown skips ahead by the same amount.
+- Alarms ring only while Productime runs. Turn on **Start at login** to keep that true after a
+  restart.
 
-## License
+## Open source and license
 
-The source code is released under the MIT License, see [LICENSE](LICENSE).
+Productime is open source. The code is released under the [MIT License](LICENSE): you may use,
+study, change, and share it. Issues and pull requests are welcome.
 
-The icon and alarm sounds in `Assets/` were supplied by the project owner. Check their own terms
-before redistributing them.
+The app icon and the alarm sounds in `Assets/` were supplied by the project owner and are not
+covered by the MIT License. Check their own terms before redistributing them.

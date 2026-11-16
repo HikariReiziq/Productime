@@ -369,18 +369,16 @@ class Scheduler:
 
         if after.phase is TargetPhase.AWAITING_SUBTASK_GATE:
             self._persist_progress()
-            self.notifier.notify(
-                "target-gate",
-                f"Batch {after.batch_index} time is up",
-                f'Check off "{session.batch.subtask_title}" to start your break.',
-                urgent=True,
-            )
+            self._notify_gate()
         elif after.phase is TargetPhase.COMPLETED:
             self._complete_target()
         elif after.batch_index != before.batch_index:
             self._begin_segment()
             self.notifier.notify(
-                "target-batch", f"Batch {after.batch_index} started", session.batch.subtask_title
+                "target-batch",
+                f"Batch {after.batch_index} started",
+                session.batch.subtask_title,
+                buttons=(("Open", "app.present", None),),
             )
         return True
 
@@ -446,7 +444,9 @@ class Scheduler:
         target.status = "completed"
         self.last_completed_target = target
         self.session = None
-        self.notifier.notify("target-done", "Target complete", target.name)
+        self.notifier.notify(
+            "target-done", "Target complete", target.name, buttons=(("Open", "app.present", None),)
+        )
 
     def timer_run(self, timer_id: str) -> TimerRun | None:
         return self.timers.get(timer_id)
@@ -525,7 +525,16 @@ class Scheduler:
             duration_seconds=run.duration_ms // 1000,
             subtask_completed=False,
         )
-        self.notifier.notify(f"timer-{run.timer_id}", "Timer finished", run.name, urgent=True)
+        self.notifier.notify(
+            f"timer-{run.timer_id}",
+            "Timer finished",
+            run.name,
+            urgent=True,
+            buttons=(
+                ("Stop", "app.timer-stop", run.timer_id),
+                ("Restart", "app.timer-restart", run.timer_id),
+            ),
+        )
 
     def refresh_alarms(self) -> None:
         """Reload alarms after any create, edit, toggle, delete, or restore."""
@@ -590,6 +599,31 @@ class Scheduler:
             alarm.name,
             f"Alarm set for {format_alarm_time(alarm.hour_24, alarm.minute)}",
             urgent=True,
+            buttons=self._alarm_buttons(entry),
+        )
+
+    def _alarm_buttons(self, entry: RingingAlarm) -> tuple:
+        alarm = entry.alarm
+        # A mission cannot be answered from a notification, so that button opens the window instead.
+        if entry.mission_total:
+            buttons = [("Open Mission", "app.present", None)]
+        else:
+            buttons = [("Stop", "app.alarm-stop", alarm.id)]
+        if alarm.snooze_limit is None or entry.snooze_count < alarm.snooze_limit:
+            buttons.append((f"Snooze {alarm.snooze_interval_minutes} min", "app.alarm-snooze", alarm.id))
+        return tuple(buttons)
+
+    def _notify_gate(self) -> None:
+        session = self.session
+        buttons = [("Check Off", "app.gate-complete", None)]
+        if session.state.can_snooze:
+            buttons.append(("Snooze 5 min", "app.gate-snooze", 5))
+        self.notifier.notify(
+            "target-gate",
+            f"Batch {session.state.batch_index} time is up",
+            f'Check off "{session.batch.subtask_title}" to start your break.',
+            urgent=True,
+            buttons=tuple(buttons),
         )
 
     def _ringing_entry(self, alarm_id: str) -> RingingAlarm:

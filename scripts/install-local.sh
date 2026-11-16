@@ -32,6 +32,35 @@ DESKTOP_DIR="$DATA_HOME/applications"
 DESKTOP_FILE="$DESKTOP_DIR/$APP_ID.desktop"
 ICON_ROOT="$DATA_HOME/icons/hicolor"
 USER_DATA="$DATA_HOME/productime"
+DBUS_SERVICE="$DATA_HOME/dbus-1/services/$APP_ID.service"
+case "${XDG_CONFIG_HOME:-}" in
+    /*) AUTOSTART_FILE="$XDG_CONFIG_HOME/autostart/$APP_ID.desktop" ;;
+    *) AUTOSTART_FILE="$HOME/.config/autostart/$APP_ID.desktop" ;;
+esac
+SEARCH_PROVIDER_NAME="$APP_ID.search-provider.ini"
+
+# GNOME Shell reads search providers only from XDG_DATA_DIRS, never from the user data dir.
+# On Fedora the user's Flatpak export folder is on that list and writable without root.
+search_provider_dir() {
+    local dir
+    local IFS=:
+    for dir in ${XDG_DATA_DIRS:-}; do
+        case "$dir" in
+            "$HOME"/*)
+                printf '%s\n' "${dir%/}/gnome-shell/search-providers"
+                return 0
+                ;;
+        esac
+    done
+    return 1
+}
+
+reload_session_bus() {
+    if command -v gdbus >/dev/null 2>&1; then
+        gdbus call --session --dest org.freedesktop.DBus --object-path /org/freedesktop/DBus \
+            --method org.freedesktop.DBus.ReloadConfig >/dev/null 2>&1 || true
+    fi
+}
 
 # Single-quote a value for /bin/sh.
 shell_quote() {
@@ -136,17 +165,39 @@ EOF
     fi
     refresh_caches
 
+    # D-Bus activation lets GNOME Shell start Productime to answer an Activities search.
+    mkdir -p "$(dirname "$DBUS_SERVICE")"
+    while IFS= read -r line || [ -n "$line" ]; do
+        printf '%s\n' "${line//@EXEC@/"$LAUNCHER"}"
+    done <"$ROOT/packaging/$APP_ID.service.in" >"$DBUS_SERVICE"
+    chmod 644 "$DBUS_SERVICE"
+    reload_session_bus
+
+    local provider_dir search_note
+    if provider_dir="$(search_provider_dir)"; then
+        install -D -m 644 "$ROOT/packaging/$SEARCH_PROVIDER_NAME" "$provider_dir/$SEARCH_PROVIDER_NAME"
+        search_note="installed in $provider_dir (log out and back in once to enable it)"
+    else
+        search_note="skipped: no folder in XDG_DATA_DIRS is writable without root"
+    fi
+
     log "Productime is installed."
     log "  App:       $APP_DIR"
     log "  Launcher:  $LAUNCHER"
-    log "  Desktop:   $DESKTOP_FILE"
+    log "  Desktop:   $DESKTOP_FILE (dock quick actions included)"
+    log "  Search:    $search_note"
     log "  Your data: $USER_DATA (created on first run)"
     log "Open it from the GNOME app grid, or run: $LAUNCHER"
 }
 
 uninstall_app() {
     remove_app_dir
-    rm -f -- "$LAUNCHER" "$DESKTOP_FILE"
+    rm -f -- "$LAUNCHER" "$DESKTOP_FILE" "$DBUS_SERVICE" "$AUTOSTART_FILE"
+    local provider_dir
+    if provider_dir="$(search_provider_dir)"; then
+        rm -f -- "$provider_dir/$SEARCH_PROVIDER_NAME"
+    fi
+    reload_session_bus
     local size
     for size in "${ICON_SIZES[@]}"; do
         rm -f -- "$ICON_ROOT/${size}x${size}/apps/$APP_ID.png"

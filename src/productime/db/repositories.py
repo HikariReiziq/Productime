@@ -10,7 +10,6 @@ from ..domain import target_engine, validation
 from ..domain.alarm_schedule import WEEKDAY_SHORT
 from ..domain.models import (
     DEFAULT_SOUND_ID,
-    TAG_COLORS,
     Alarm,
     AlarmDraft,
     FocusLog,
@@ -110,7 +109,7 @@ class Repository:
                     target_id,
                     draft.name,
                     draft.tag_label,
-                    TAG_COLORS[draft.tag_label],
+                    validation.tag_color(draft.tag_label),
                     config.target_total_minutes,
                     config.work_minutes,
                     config.short_break_minutes,
@@ -139,7 +138,7 @@ class Repository:
                 (
                     draft.name,
                     draft.tag_label,
-                    TAG_COLORS[draft.tag_label],
+                    validation.tag_color(draft.tag_label),
                     config.target_total_minutes,
                     config.work_minutes,
                     config.short_break_minutes,

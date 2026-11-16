@@ -563,5 +563,56 @@ class AlertPriorityAndBackgroundTests(SchedulerTestCase):
         self.assertEqual(self.scheduler.stopwatch_elapsed_ms(), 0)
 
 
+class NotificationButtonTests(SchedulerTestCase):
+    """Buttons on GNOME notifications act without opening the window."""
+
+    def test_gate_notification_offers_check_off_and_a_snooze_while_snoozes_remain(self):
+        target = self.repo.create_target(short_target(snooze_limit=1))
+        self.scheduler.start_target(target.id)
+        self.run_for(MIN, step=5)
+
+        self.assertEqual(
+            self.notifier.buttons["target-gate"],
+            (("Check Off", "app.gate-complete", None), ("Snooze 5 min", "app.gate-snooze", 5)),
+        )
+        self.scheduler.snooze_session(1)
+        self.run_for(MIN, step=5)
+
+        self.assertEqual(self.notifier.button_labels("target-gate"), ["Check Off"])
+
+    def test_alarm_without_a_mission_offers_stop_and_snooze(self):
+        alarm = self.repo.create_alarm(alarm_draft(snooze_interval_minutes=10, snooze_limit=None))
+        self.scheduler.refresh_alarms()
+
+        self.run_for(5 * MIN, step=1)
+
+        self.assertEqual(
+            self.notifier.buttons[f"alarm-{alarm.id}"],
+            (("Stop", "app.alarm-stop", alarm.id), ("Snooze 10 min", "app.alarm-snooze", alarm.id)),
+        )
+
+    def test_alarm_with_a_mission_opens_the_mission_instead_of_stopping(self):
+        alarm = self.repo.create_alarm(alarm_draft(mission_mode="math", snooze_limit=1))
+        self.scheduler.refresh_alarms()
+        self.run_for(5 * MIN, step=1)
+
+        self.assertEqual(self.notifier.button_labels(f"alarm-{alarm.id}"), ["Open Mission", "Snooze 5 min"])
+        self.scheduler.snooze_alarm(alarm.id)
+        self.run_for(5 * MIN, step=1)
+
+        self.assertEqual(self.notifier.button_labels(f"alarm-{alarm.id}"), ["Open Mission"])
+
+    def test_expired_timer_offers_stop_and_restart(self):
+        timer = self.repo.create_timer(timer_draft(duration_seconds=10))
+        self.scheduler.start_timer(timer.id)
+
+        self.run_for(10, step=1)
+
+        self.assertEqual(
+            self.notifier.buttons[f"timer-{timer.id}"],
+            (("Stop", "app.timer-stop", timer.id), ("Restart", "app.timer-restart", timer.id)),
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

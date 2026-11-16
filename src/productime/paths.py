@@ -40,5 +40,5 @@ def icons_dir() -> Path:
     return PACKAGE_DIR / "ui" / "icons"
 
 
-def brand_icon_path() -> Path:
-    return icons_dir() / "productime-brand-64.png"
+def brand_icon_path(size: int = 64) -> Path:
+    return icons_dir() / f"productime-brand-{128 if size > 64 else 64}.png"

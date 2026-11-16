@@ -11,3 +11,21 @@ Categories=Utility;Clock;Education;
 Keywords=pomodoro;timer;alarm;stopwatch;focus;productivity;
 StartupNotify=true
 StartupWMClass=org.productime.Productime
+X-GNOME-UsesNotifications=true
+Actions=new-target;new-alarm;new-timer;stopwatch;
+
+[Desktop Action new-target]
+Name=New Target
+Exec=@EXEC@ --open=new-target
+
+[Desktop Action new-alarm]
+Name=New Alarm
+Exec=@EXEC@ --open=new-alarm
+
+[Desktop Action new-timer]
+Name=New Timer
+Exec=@EXEC@ --open=new-timer
+
+[Desktop Action stopwatch]
+Name=Start Stopwatch
+Exec=@EXEC@ --open=stopwatch

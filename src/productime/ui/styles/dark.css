@@ -1,40 +1,41 @@
 /* Dark theme tokens. Only colors live here; every rule is in base.css. */
 
-@define-color bg_canvas #070417;
-@define-color bg_surface #292639;
-@define-color bg_surface_elevated #322E44;
-@define-color bg_track #1E1B2E;
-@define-color border_subtle #3F3C4E;
-@define-color border_strong #8E8AA8;
-@define-color text_primary #FFFFFF;
-@define-color text_secondary #C9C6D8;
-@define-color text_muted #A7A3BA;
-@define-color accent_text #A5B4FC;
+@define-color bg_canvas #000000;
+@define-color bg_surface #17171A;
+@define-color bg_surface_elevated #232328;
+@define-color bg_track #2C2C32;
+@define-color border_subtle #2E2E34;
+@define-color border_strong #8C8C96;
+@define-color text_primary #F4F4F7;
+@define-color text_secondary #C2C2CC;
+@define-color text_muted #9E9EA8;
 
-@define-color accent_start #215BF0;
-@define-color accent_end #8B44E3;
+@define-color accent #1F5FEA;
 @define-color on_accent #FFFFFF;
-/* Brighter than the brand stops: #215BF0 on the dark card surface is under 3:1. */
-@define-color ring_start #5B8CFF;
-@define-color ring_end #B07CF7;
-@define-color focus_violet #B98AF2;
+@define-color accent_text #8AB4FF;
+/* Brighter than the button fill: #1F5FEA on the dark card surface is near 3:1. */
+@define-color ring #5B95FF;
+@define-color control_fill #3B7BF5;
+@define-color live_dot #8AB4FF;
+@define-color nav_active_bg #1A2744;
+@define-color nav_active_icon #8AB4FF;
 
 @define-color success #07E092;
 @define-color on_success #070417;
-@define-color success_bg #1E3A36;
-@define-color success_text #2CEAA3;
+@define-color success_bg #14302A;
+@define-color success_text #4ADE9F;
 @define-color rest #FFA656;
-@define-color rest_bg #3D313A;
+@define-color rest_bg #3A2A1A;
 @define-color rest_text #FFB46E;
 @define-color alert #FD5B71;
-@define-color alert_bg #3E2B3E;
-@define-color alert_text #FF7A8B;
+@define-color alert_bg #3A1F1E;
+@define-color alert_text #FF8A80;
 @define-color duration_badge #3D4ABA;
 @define-color on_duration_badge #FFFFFF;
-@define-color violet_bg #37294F;
-@define-color violet_text #D4B8FA;
-@define-color cobalt_bg #1F2C55;
-@define-color cobalt_text #A5B4FC;
+@define-color violet_bg #2B2140;
+@define-color violet_text #C9A7FF;
+@define-color cobalt_bg #1A2744;
+@define-color cobalt_text #8AB4FF;
 
 /* libadwaita picks these up so stock widgets match the brand surfaces. */
 @define-color window_bg_color @bg_canvas;
@@ -46,11 +47,11 @@
 @define-color headerbar_backdrop_color @bg_canvas;
 @define-color card_bg_color @bg_surface;
 @define-color card_fg_color @text_primary;
-@define-color dialog_bg_color @bg_surface;
+@define-color dialog_bg_color @bg_canvas;
 @define-color dialog_fg_color @text_primary;
 @define-color popover_bg_color @bg_surface;
 @define-color popover_fg_color @text_primary;
-@define-color accent_bg_color @accent_start;
+@define-color accent_bg_color @accent;
 @define-color accent_fg_color @on_accent;
 @define-color accent_color @accent_text;
 @define-color destructive_color @alert_text;

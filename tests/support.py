@@ -127,9 +127,14 @@ class RecordingNotifier:
     def __init__(self):
         self.sent: list[tuple[str, str, str]] = []
         self.withdrawn: list[str] = []
+        self.buttons: dict[str, tuple] = {}
 
-    def notify(self, key, title, body, urgent=False):
+    def notify(self, key, title, body, urgent=False, buttons=()):
         self.sent.append((key, title, body))
+        self.buttons[key] = tuple(buttons)
+
+    def button_labels(self, key) -> list[str]:
+        return [label for label, _action, _target in self.buttons.get(key, ())]
 
     def withdraw(self, key):
         self.withdrawn.append(key)

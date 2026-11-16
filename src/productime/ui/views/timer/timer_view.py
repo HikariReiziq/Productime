@@ -8,7 +8,7 @@ from ....services.scheduler_service import SchedulerError
 from ...widgets.controls import chip, clear_box, hbox, icon_button, make_button, text_label, vbox, wrap_row
 from ...widgets.progress_ring import ProgressRing
 from ...widgets.state_panels import StatePanel, ViewStates
-from .create_timer_dialog import CreateTimerDialog
+from .timer_editor import TimerEditor
 
 STATUS_CHIPS = {
     "idle": ("Ready", ""),
@@ -25,7 +25,6 @@ class TimerView(Gtk.Box):
         self.window = window
         self.repo = window.app.repo
         self.scheduler = window.scheduler
-        self.dialog: CreateTimerDialog | None = None
         self.cards: dict[str, dict] = {}
 
         self.create_button = make_button(
@@ -62,9 +61,16 @@ class TimerView(Gtk.Box):
             if run is not None and run.status == "running":
                 self._paint_ring(card["ring"], card["preset"], run)
 
+    @property
+    def editor(self) -> TimerEditor | None:
+        return self.window.editor_for("timer")
+
     def create(self) -> None:
-        self.dialog = CreateTimerDialog(self.window, on_saved=lambda _t: self.reload())
-        self.dialog.present(self.window)
+        if self.editor is not None:
+            self.window.navigate("timer")
+            return
+        editor = TimerEditor(self.window, on_saved=lambda _t: self.reload())
+        self.window.open_editor(editor, self.create_button)
 
     def _render(self, timers: list[TimerPreset]) -> None:
         clear_box(self.list_box)
@@ -154,8 +160,8 @@ class TimerView(Gtk.Box):
             self.window.toast(str(error))
 
     def edit(self, preset: TimerPreset) -> None:
-        self.dialog = CreateTimerDialog(self.window, timer=preset, on_saved=lambda _t: self.reload())
-        self.dialog.present(self.window)
+        editor = TimerEditor(self.window, timer=preset, on_saved=lambda _t: self.reload())
+        self.window.open_editor(editor, self.cards.get(preset.id, {}).get("buttons", {}).get("edit"))
 
     def ask_delete(self, preset: TimerPreset) -> None:
         self.window.confirm(

@@ -8,6 +8,11 @@ from ..paths import icons_dir, styles_dir
 from .tokens import hex_to_rgb, load_tokens
 
 THEMES = ("light", "dark")
+SCHEMES = {
+    "system": Adw.ColorScheme.DEFAULT,
+    "light": Adw.ColorScheme.FORCE_LIGHT,
+    "dark": Adw.ColorScheme.FORCE_DARK,
+}
 
 
 class ThemeManager:
@@ -47,14 +52,15 @@ class ThemeManager:
         self._style_handler = self._style.connect("notify::dark", lambda *_: self._apply())
         self._apply()
 
+    @property
+    def scheme(self) -> str:
+        """The saved choice: "system", "light", or "dark"."""
+        saved = self._repo.get_pref("theme", "system")
+        return saved if saved in SCHEMES else "system"
+
     def apply_saved_preference(self) -> None:
         """Follow the saved choice, or the desktop setting when the user never chose."""
-        saved = self._repo.get_pref("theme", "")
-        scheme = {
-            "light": Adw.ColorScheme.FORCE_LIGHT,
-            "dark": Adw.ColorScheme.FORCE_DARK,
-        }.get(saved, Adw.ColorScheme.DEFAULT)
-        self._style.set_color_scheme(scheme)
+        self._style.set_color_scheme(SCHEMES[self.scheme])
 
     def uninstall(self) -> None:
         if self._display is None:
@@ -69,10 +75,14 @@ class ThemeManager:
         self._display = None
         self._listeners.clear()
 
-    def set_dark(self, dark: bool) -> None:
-        self._repo.set_pref("theme", "dark" if dark else "light")
-        self._style.set_color_scheme(Adw.ColorScheme.FORCE_DARK if dark else Adw.ColorScheme.FORCE_LIGHT)
+    def set_scheme(self, scheme: str) -> None:
+        self._repo.set_pref("theme", scheme if scheme in SCHEMES else "system")
+        self.apply_saved_preference()
         self._apply()
+        self._notify()
+
+    def set_dark(self, dark: bool) -> None:
+        self.set_scheme("dark" if dark else "light")
 
     def _apply(self) -> None:
         name = self.name
@@ -84,6 +94,9 @@ class ThemeManager:
             self._display, self._providers[name], Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
         )
         self._active = name
+        self._notify()
+
+    def _notify(self) -> None:
         for listener in list(self._listeners):
             listener()
 

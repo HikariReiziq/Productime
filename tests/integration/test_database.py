@@ -78,6 +78,16 @@ class TargetRepositoryTests(DatabaseTestCase):
         self.assertEqual([b.break_type for b in loaded.batches], ["short", "short", "long"] * 2)
         self.assertEqual(loaded.total_timeline_minutes, 400)
 
+    def test_custom_category_is_stored_with_a_neutral_colour(self):
+        from dataclasses import replace
+
+        created = self.repo.create_target(replace(EXAMPLE_1, tag_label="Skripsi"))
+
+        loaded = self.repo.get_target(created.id)
+        self.assertEqual((loaded.tag_label, loaded.tag_color), ("Skripsi", "gray"))
+        self.repo.update_target(created.id, replace(EXAMPLE_1, tag_label="Coding"))
+        self.assertEqual(self.repo.get_target(created.id).tag_color, "blue")
+
     def test_unlimited_snooze_is_stored_as_null(self):
         created = self.repo.create_target(EXAMPLE_2)
 

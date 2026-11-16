@@ -62,3 +62,14 @@ def format_delta(delta_ms: int) -> str:
 def format_alarm_time(hour_24: int, minute: int) -> str:
     hour_12, period = to_12h(hour_24)
     return f"{hour_12:02d}:{minute:02d} {period}"
+
+
+def format_minutes(minutes: int) -> str:
+    return "1 minute" if minutes == 1 else f"{minutes} minutes"
+
+
+def format_snooze_limit(limit: int | None) -> str:
+    """How many snoozes are allowed, where None means no limit."""
+    if limit is None:
+        return "Unlimited"
+    return "1 time" if limit == 1 else f"{limit} times"

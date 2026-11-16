@@ -171,9 +171,21 @@ class TargetValidationTests(unittest.TestCase):
             with self.subTest(limit=limit), self.assertRaises(v.ValidationError):
                 v.validate_target_draft(target_draft(snooze_limit=limit))
 
-    def test_unknown_tag_is_rejected(self):
-        with self.assertRaises(v.ValidationError):
-            v.validate_target_draft(target_draft(tag_label="Gaming"))
+    def test_a_custom_category_name_is_accepted_and_trimmed(self):
+        cleaned = v.validate_target_draft(target_draft(tag_label="  Skripsi\x07 Bab 2 "))
+
+        self.assertEqual(cleaned.tag_label, "Skripsi Bab 2")
+
+    def test_custom_category_must_have_a_short_non_blank_name(self):
+        for bad in ("", "   ", "x" * (v.MAX_TAG_LENGTH + 1)):
+            with self.subTest(tag=bad), self.assertRaises(v.ValidationError) as caught:
+                v.validate_target_draft(target_draft(tag_label=bad))
+            self.assertEqual(caught.exception.field, "tag_label")
+
+    def test_category_colour_is_fixed_for_presets_and_neutral_for_custom_names(self):
+        self.assertEqual(v.tag_color("Coding"), "blue")
+        self.assertEqual(v.tag_color("Work"), "red")
+        self.assertEqual(v.tag_color("Skripsi"), "gray")
 
     def test_snooze_minutes_are_bounded(self):
         self.assertEqual(v.validate_snooze_minutes(7), 7)
@@ -273,6 +285,24 @@ class BackupValidationTests(unittest.TestCase):
         payload["preferences"]["shell_command"] = "rm -rf ~"
 
         self.assertNotIn("shell_command", v.validate_backup(payload)["preferences"])
+
+    def test_settings_preferences_round_trip_through_a_backup(self):
+        payload = backup_payload()
+        payload["preferences"].update(
+            theme="system", notify_alarms="0", notify_timers="1", notify_targets="0", onboarding_done="1"
+        )
+
+        kept = v.validate_backup(payload)["preferences"]
+
+        self.assertEqual(kept["theme"], "system")
+        self.assertEqual(
+            (kept["notify_alarms"], kept["notify_targets"], kept["onboarding_done"]), ("0", "0", "1")
+        )
+        for bad in ({"notify_alarms": "yes"}, {"onboarding_done": "2"}, {"theme": "blue"}):
+            payload = backup_payload()
+            payload["preferences"].update(bad)
+            with self.subTest(bad=bad), self.assertRaises(v.ValidationError):
+                v.validate_backup(payload)
 
     def test_duplicate_batch_indexes_are_rejected(self):
         payload = backup_payload()

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 import _bootstrap  # noqa: F401
 
 from productime.domain import alarm_schedule as schedule
-from productime.domain.formatters import format_alarm_time
+from productime.domain.formatters import format_alarm_time, format_minutes, format_snooze_limit
 
 # 2026-11-16 is a Monday (ISO weekday 1).
 MONDAY_0600 = datetime(2026, 11, 16, 6, 0, 0)
@@ -40,6 +40,17 @@ class TwelveHourConversionTests(unittest.TestCase):
         self.assertEqual(format_alarm_time(6, 30), "06:30 AM")
         self.assertEqual(format_alarm_time(0, 5), "12:05 AM")
         self.assertEqual(format_alarm_time(18, 0), "06:00 PM")
+
+
+class SnoozeTextTests(unittest.TestCase):
+    def test_snooze_limits_read_as_counts(self):
+        self.assertEqual(
+            [format_snooze_limit(limit) for limit in (None, 1, 2, 10)],
+            ["Unlimited", "1 time", "2 times", "10 times"],
+        )
+
+    def test_minutes_use_the_singular_for_one(self):
+        self.assertEqual([format_minutes(m) for m in (1, 5, 30)], ["1 minute", "5 minutes", "30 minutes"])
 
 
 class NextRingTests(unittest.TestCase):

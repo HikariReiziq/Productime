@@ -9,7 +9,7 @@ from .models import (
     MISSION_DIFFICULTIES,
     MISSION_MODES,
     SNOOZE_LIMIT_CHOICES,
-    TAG_LABELS,
+    TAG_COLORS,
     AlarmDraft,
     TargetDraft,
     TimerDraft,
@@ -19,6 +19,8 @@ BACKUP_FORMAT = "productime-backup"
 BACKUP_VERSION = 1
 
 MAX_NAME_LENGTH = 80
+MAX_TAG_LENGTH = 24
+CUSTOM_TAG_COLOR = "gray"
 MAX_TARGET_MINUTES = 24 * 60
 MAX_WORK_MINUTES = 240
 MAX_BREAK_MINUTES = 240
@@ -29,12 +31,17 @@ MAX_BATCHES = 200
 MAX_ROWS = {"sounds": 500, "targets": 2000, "alarms": 500, "timers": 500, "focus_logs": 200_000}
 
 SOUND_EXTENSIONS = ("mp3", "wav", "ogg", "flac", "m4a")
+_FLAG = ("0", "1")
 PREFERENCE_RULES = {
-    "theme": lambda v: v in ("light", "dark"),
+    "theme": lambda v: v in ("system", "light", "dark"),
     "language": lambda v: v in ("en", "id"),
-    "close_to_background": lambda v: v in ("0", "1"),
-    "muted": lambda v: v in ("0", "1"),
+    "close_to_background": lambda v: v in _FLAG,
+    "muted": lambda v: v in _FLAG,
     "volume": lambda v: v.isascii() and v.isdigit() and 0 <= int(v) <= 100,
+    "notify_alarms": lambda v: v in _FLAG,
+    "notify_timers": lambda v: v in _FLAG,
+    "notify_targets": lambda v: v in _FLAG,
+    "onboarding_done": lambda v: v in _FLAG,
 }
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -84,14 +91,18 @@ def _snooze_limit(value: object) -> int | None:
     return value
 
 
+def tag_color(tag_label: str) -> str:
+    """Preset categories keep their own colour; a name the user typed gets the neutral one."""
+    return TAG_COLORS.get(tag_label, CUSTOM_TAG_COLOR)
+
+
 def validate_snooze_minutes(minutes: object) -> int:
     return _int_in(minutes, "snooze_minutes", 1, MAX_SNOOZE_MINUTES)
 
 
 def validate_target_draft(draft: TargetDraft) -> TargetDraft:
     name = clean_text(draft.name, "name")
-    if draft.tag_label not in TAG_LABELS:
-        raise ValidationError("tag_label", "Choose a category from the list.")
+    tag_label = clean_text(draft.tag_label, "tag_label", MAX_TAG_LENGTH)
     config = draft.config
     _int_in(config.target_total_minutes, "target_total_minutes", 1, MAX_TARGET_MINUTES)
     _int_in(config.work_minutes, "work_minutes", 1, MAX_WORK_MINUTES)
@@ -112,6 +123,7 @@ def validate_target_draft(draft: TargetDraft) -> TargetDraft:
     return replace(
         draft,
         name=name,
+        tag_label=tag_label,
         snooze_limit=_snooze_limit(draft.snooze_limit),
         sound_id=_sound_id(draft.sound_id),
         subtask_titles=tuple(titles),

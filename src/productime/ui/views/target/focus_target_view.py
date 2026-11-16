@@ -15,6 +15,7 @@ from ...widgets.controls import (
     icon_button,
     make_button,
     set_accessible_label,
+    tag_style,
     text_label,
     vbox,
     wrap_row,
@@ -132,7 +133,7 @@ class FocusTargetView(Gtk.Box):
         state, target = session.state, session.target
         self.title_label.set_text(target.name)
         clear_box(self.chips)
-        self.chips.append(chip(target.tag_label, target.tag_label.lower()))
+        self.chips.append(chip(target.tag_label, tag_style(target.tag_color)))
         self.chips.append(chip(f"Batch {state.batch_index} of {state.batch_count}"))
         phase_text = PHASE_TEXT[state.phase]
         if state.phase in _RESTING and state.plan.break_type == "long":

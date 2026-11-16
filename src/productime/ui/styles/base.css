@@ -1,4 +1,5 @@
-/* Productime rules. Colors come from light.css or dark.css through @named tokens. */
+/* Productime rules. Colors come from light.css or dark.css through @named tokens.
+   Visual language follows One UI: soft canvas, borderless rounded cards, flat pill controls. */
 
 :root {
   --window-bg-color: @bg_canvas;
@@ -8,13 +9,14 @@
   --headerbar-bg-color: @bg_canvas;
   --headerbar-fg-color: @text_primary;
   --headerbar-backdrop-color: @bg_canvas;
+  --headerbar-shade-color: transparent;
   --card-bg-color: @bg_surface;
   --card-fg-color: @text_primary;
-  --dialog-bg-color: @bg_surface;
+  --dialog-bg-color: @bg_canvas;
   --dialog-fg-color: @text_primary;
   --popover-bg-color: @bg_surface;
   --popover-fg-color: @text_primary;
-  --accent-bg-color: @accent_start;
+  --accent-bg-color: @accent;
   --accent-fg-color: @on_accent;
   --accent-color: @accent_text;
   --destructive-color: @alert_text;
@@ -23,12 +25,13 @@
 window.productime {
   background-color: @bg_canvas;
   color: @text_primary;
-  font-family: "Rubik", "Adwaita Sans", "Cantarell", sans-serif;
+  font-family: "Adwaita Sans", "Cantarell", sans-serif;
   font-size: 14px;
 }
 
-/* A solid ring, because libadwaita's default focus ring is half transparent. */
-*:focus-visible {
+/* GTK 4 also marks every ancestor of the focused widget focus-visible, so :focus is required
+   to draw the ring once, on the control itself. */
+*:focus:focus-visible {
   outline: 2px solid @accent_text;
   outline-offset: 2px;
 }
@@ -39,13 +42,31 @@ spinbutton:focus-within {
   outline-offset: 1px;
 }
 
+/* The field's own ring marks focus, so the text node inside it must not draw a second one. */
+entry > text:focus:focus-visible,
+spinbutton > text:focus:focus-visible {
+  outline: none;
+}
+
+/* A narrow dialog opens as a bottom sheet that takes focus itself; it is a container, not a control. */
+sheet:focus:focus-visible {
+  outline: none;
+}
+
+/* A clock picker shows focus as a solid blue frame, like GNOME Clocks, instead of an outer ring. */
+spinbutton.vertical:focus-within {
+  outline: none;
+  border-color: @accent_text;
+  box-shadow: inset 0 0 0 1px @accent_text;
+}
+
 .numeric {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum";
 }
 
-.page-title { font-size: 24px; font-weight: 500; }
-.section-title { font-size: 18px; font-weight: 500; }
+.page-title { font-size: 30px; font-weight: 600; letter-spacing: -0.3px; }
+.section-title { font-size: 17px; font-weight: 600; }
 .card-title { font-size: 16px; font-weight: 500; }
 .body-strong { font-weight: 500; }
 .secondary { color: @text_secondary; }
@@ -56,97 +77,105 @@ spinbutton:focus-within {
 /* Shell */
 
 .rail {
-  background-color: @bg_surface;
-  border-right: 1px solid @border_subtle;
-  padding: 16px 12px;
+  background-color: @bg_canvas;
+  padding: 14px 0 12px 0;
 }
 
-.brand-title { font-size: 18px; font-weight: 500; }
-.brand-mark { border-radius: 8px; }
+.brand-title { font-size: 17px; font-weight: 600; }
+.brand-mark { border-radius: 10px; }
 
-button.nav-item {
+button.rail-item,
+button.rail-tool {
+  min-width: 56px;
   min-height: 44px;
-  padding: 0 12px;
-  border-radius: 10px;
+  padding: 0;
+  border-radius: 9999px;
   border: none;
   box-shadow: none;
   background-color: transparent;
   background-image: none;
   color: @text_secondary;
-  font-weight: 500;
-  transition: background-color 120ms ease-out;
+  transition: background-color 150ms ease-out, color 150ms ease-out;
 }
 
-button.nav-item:hover {
+button.rail-item:hover,
+button.rail-tool:hover {
   background-color: @bg_surface_elevated;
   color: @text_primary;
 }
 
-/* The bar marks the current view; it only appears on the checked item. */
-button.nav-item:checked {
-  background-color: @bg_surface_elevated;
-  color: @text_primary;
-  box-shadow: inset 3px 0 0 0 @ring_start;
+button.rail-item image { -gtk-icon-size: 22px; }
+button.rail-tool image { -gtk-icon-size: 20px; }
+
+/* The tinted pill behind the icon marks the current view. */
+button.rail-item:checked {
+  background-color: @nav_active_bg;
+  color: @nav_active_icon;
 }
 
-.bottom-bar {
+/* A switched-on tool only changes its icon color, so it never looks like a selected view. */
+button.rail-tool:checked {
+  background-color: transparent;
+  color: @nav_active_icon;
+}
+
+button.rail-tool:checked:hover { background-color: @bg_surface_elevated; }
+
+/* The compact header has less room, so its tool icons drop to the 44px minimum. */
+.header-tools button.rail-tool { min-width: 44px; }
+
+.rail-divider {
+  min-height: 1px;
+  margin: 6px 20px;
+  background-color: @border_subtle;
+}
+
+/* Not named bottom-bar: libadwaita already uses that class inside every toolbar view. */
+.nav-bar {
   background-color: @bg_surface;
-  border-top: 1px solid @border_subtle;
-  padding: 4px;
+  padding: 6px 8px;
 }
 
-.bottom-bar button.nav-item {
-  min-height: 52px;
-  padding: 4px 2px;
-  font-size: 12px;
+.live-pill {
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 9999px;
+  background-color: @nav_active_bg;
+  color: @nav_active_icon;
+  font-weight: 500;
 }
 
-.bottom-bar button.nav-item:checked {
-  box-shadow: inset 0 3px 0 0 @ring_start;
-}
-
-.mini-session {
-  background-color: @bg_surface_elevated;
-  border: 1px solid @border_subtle;
-  border-radius: 12px;
-  padding: 10px 12px;
-}
+.live-pill:hover { background-color: @bg_surface_elevated; }
 
 .alert-bar {
   background-color: @alert_bg;
   color: @alert_text;
-  border-bottom: 1px solid @alert_text;
-  padding: 8px 16px;
-}
-
-.settings-group {
-  border-top: 1px solid @border_subtle;
-  padding-top: 12px;
+  padding: 8px 20px;
 }
 
 /* Surfaces */
 
-/* libadwaita also styles .card and gives it a shadow; these surfaces stay flat with a hairline. */
+/* libadwaita also styles .card with a shadow; these cards stay flat on the softer canvas. */
 .card {
   background-color: @bg_surface;
-  border: 1px solid @border_subtle;
-  border-radius: 16px;
-  padding: 20px;
+  border: none;
+  border-radius: 24px;
+  padding: 22px;
   box-shadow: none;
 }
 
 .row-card {
   background-color: @bg_surface;
-  border: 1px solid @border_subtle;
-  border-radius: 12px;
-  padding: 12px 16px;
+  border: none;
+  border-radius: 20px;
+  padding: 14px 18px;
   min-height: 52px;
 }
 
-.hero-time { font-size: 32px; font-weight: 500; }
-.clock-display { font-size: 56px; font-weight: 500; }
-.clock-display.compact { font-size: 38px; }
-.alarm-time { font-size: 32px; font-weight: 500; }
+.hero-time { font-size: 44px; font-weight: 300; }
+.clock-display { font-size: 68px; font-weight: 300; }
+.clock-display.compact { font-size: 44px; }
+.alarm-time { font-size: 38px; font-weight: 300; }
 
 .icon-well {
   min-width: 44px;
@@ -166,16 +195,16 @@ button.nav-item:checked {
   min-width: 10px;
   min-height: 10px;
   border-radius: 9999px;
-  background-color: @focus_violet;
+  background-color: @live_dot;
 }
 
 /* Chips */
 
 .chip {
-  border-radius: 6px;
-  padding: 2px 8px;
+  border-radius: 9999px;
+  padding: 3px 10px;
   font-size: 12px;
-  background-color: @bg_track;
+  background-color: @bg_surface_elevated;
   color: @text_secondary;
 }
 
@@ -185,21 +214,38 @@ button.nav-item:checked {
 .chip.personal, .chip.rest { background-color: @rest_bg; color: @rest_text; }
 .chip.success { background-color: @success_bg; color: @success_text; }
 
+/* Repeat days in the alarm dialog: seven round toggles that fit one row even at 420px. */
+.day-toggles button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border-radius: 9999px;
+  border: none;
+  box-shadow: none;
+  background-image: none;
+  background-color: @bg_surface_elevated;
+  color: @text_secondary;
+  font-size: 13px;
+}
+
+.day-toggles button:hover { background-color: @bg_track; }
+.day-toggles button:checked { background-color: @accent; color: @on_accent; font-weight: 600; }
+
 .day-pill {
-  border-radius: 6px;
-  padding: 2px 6px;
+  border-radius: 9999px;
+  padding: 2px 8px;
   font-size: 12px;
-  background-color: @bg_track;
+  background-color: transparent;
   color: @text_muted;
 }
 
-.day-pill.active { background-color: @cobalt_bg; color: @cobalt_text; font-weight: 500; }
+.day-pill.active { background-color: @cobalt_bg; color: @cobalt_text; font-weight: 600; }
 
 .total-badge {
   background-color: @cobalt_bg;
   color: @cobalt_text;
-  border-radius: 8px;
-  padding: 6px 12px;
+  border-radius: 9999px;
+  padding: 6px 14px;
   font-weight: 500;
 }
 
@@ -211,52 +257,46 @@ button.destructive-outline,
 button.ghost {
   min-height: 44px;
   min-width: 44px;
-  padding: 0 16px;
-  border-radius: 10px;
+  padding: 0 20px;
+  border-radius: 9999px;
+  border: none;
   font-weight: 500;
   box-shadow: none;
-  transition: background-color 120ms ease-out;
+  background-image: none;
+  transition: background-color 150ms ease-out;
 }
 
 button.primary {
-  background-image: linear-gradient(135deg, @accent_start, @accent_end);
+  background-color: @accent;
   color: @on_accent;
-  border: none;
 }
 
 button.primary:hover { box-shadow: inset 0 0 0 100px alpha(white, 0.10); }
 button.primary:active { box-shadow: inset 0 0 0 100px alpha(black, 0.12); }
 
 button.primary:disabled {
-  background-image: none;
   background-color: @bg_track;
   color: @text_muted;
 }
 
 button.secondary {
-  background-image: none;
   background-color: @bg_surface_elevated;
   color: @text_primary;
-  border: 1px solid @border_strong;
 }
 
 button.secondary:hover { background-color: @bg_track; }
 
 button.destructive-outline {
-  background-image: none;
-  background-color: transparent;
+  background-color: @alert_bg;
   color: @alert_text;
-  border: 1px solid @alert_text;
 }
 
-button.destructive-outline:hover { background-color: @alert_bg; }
+button.destructive-outline:hover { box-shadow: inset 0 0 0 100px alpha(@alert_text, 0.10); }
 
 button.ghost {
-  background-image: none;
   background-color: transparent;
   color: @text_secondary;
-  border: none;
-  padding: 0 10px;
+  padding: 0 12px;
 }
 
 button.ghost:hover { background-color: @bg_surface_elevated; color: @text_primary; }
@@ -265,7 +305,6 @@ button.secondary:disabled,
 button.destructive-outline:disabled,
 button.ghost:disabled {
   color: @text_muted;
-  border-color: @border_subtle;
 }
 
 button.round-well {
@@ -280,35 +319,38 @@ button.round-well {
 .choice-group button {
   min-height: 44px;
   min-width: 44px;
-  padding: 0 12px;
-  border-radius: 10px;
-  border: 1px solid @border_strong;
+  padding: 0 16px;
+  border-radius: 9999px;
+  border: none;
   box-shadow: none;
   background-image: none;
-  background-color: transparent;
+  background-color: @bg_surface_elevated;
   color: @text_secondary;
   font-weight: 400;
 }
 
-.choice-group button:hover { background-color: @bg_surface_elevated; }
+/* Rows that share the width evenly must fit seven options at 420px. GTK adds padding on top of
+   min-width, so 32px plus 6px each side keeps every option at the 44px minimum. */
+.choice-group.fill button { min-width: 32px; padding: 0 6px; }
+
+.choice-group button:hover { background-color: @bg_track; }
 
 .choice-group button:checked {
   background-color: @cobalt_bg;
   color: @cobalt_text;
-  border-color: @accent_text;
-  font-weight: 500;
+  font-weight: 600;
 }
 
 .segmented {
   background-color: @bg_track;
-  border-radius: 10px;
+  border-radius: 9999px;
   padding: 3px;
 }
 
 .segmented button {
   min-height: 44px;
-  padding: 0 18px;
-  border-radius: 8px;
+  padding: 0 20px;
+  border-radius: 9999px;
   border: none;
   box-shadow: none;
   background-image: none;
@@ -322,6 +364,20 @@ button.round-well {
   color: @text_primary;
 }
 
+/* A full pill radius on a tall, narrow track bends into an oval that the inner pill cannot follow.
+   Concentric corners keep the edges parallel: inner radius equals outer radius minus the padding. */
+.segmented.vertical {
+  border-radius: 18px;
+  padding: 4px;
+}
+
+.segmented.vertical button {
+  min-width: 64px;
+  min-height: 48px;
+  padding: 0 12px;
+  border-radius: 14px;
+}
+
 /* Form fields */
 
 .field-label { font-size: 13px; font-weight: 500; color: @text_secondary; }
@@ -332,30 +388,73 @@ text > placeholder {
   color: @text_muted;
 }
 
-/* The brand cobalt is under 3:1 on the dark card surface, so filled controls use the ring color. */
+/* The button fill is under 3:1 on the dark card surface, so filled controls use their own token. */
 scale > trough > highlight,
 switch:checked {
-  background-color: @ring_start;
+  background-color: @control_fill;
 }
 
 entry,
 spinbutton {
   min-height: 44px;
-  border-radius: 10px;
+  border-radius: 14px;
   border: 1px solid @border_strong;
-  background-color: @bg_canvas;
+  background-color: @bg_surface;
   color: @text_primary;
   box-shadow: none;
 }
 
+/* Number fields follow GNOME Clocks: plus above, the value in the middle, minus below. */
+spinbutton.vertical {
+  min-width: 64px;
+  padding: 0;
+  border-radius: 16px;
+}
+
+spinbutton.vertical > text {
+  min-height: 44px;
+  padding: 2px 8px;
+  font-size: 20px;
+  font-weight: 500;
+  border-top: 1px solid @border_subtle;
+  border-bottom: 1px solid @border_subtle;
+}
+
+spinbutton.vertical > button {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: none;
+  box-shadow: none;
+  background-image: none;
+  background-color: transparent;
+  color: @text_primary;
+}
+
+spinbutton.vertical > button.up { border-radius: 15px 15px 0 0; }
+spinbutton.vertical > button.down { border-radius: 0 0 15px 15px; }
+spinbutton.vertical > button:hover { background-color: @bg_surface_elevated; }
+spinbutton.vertical > button:disabled { color: @text_muted; }
+
+spinbutton.vertical.big { min-width: 96px; }
+
+spinbutton.vertical.big > text {
+  min-height: 76px;
+  padding: 0 10px;
+  font-size: 52px;
+  font-weight: 300;
+}
+
+.time-colon { font-size: 44px; font-weight: 300; color: @text_secondary; }
+
 .form-section {
   border-top: 1px solid @border_subtle;
-  padding-top: 14px;
+  padding-top: 16px;
 }
 
 /* Timeline */
 
-.timeline-row { padding: 4px 8px 4px 0; border-radius: 12px; }
+.timeline-row { padding: 4px 10px 4px 0; border-radius: 16px; }
 .timeline-row.active { background-color: @bg_surface_elevated; }
 .timeline-title { font-weight: 500; }
 .timeline-range { font-size: 12px; color: @text_secondary; }
@@ -363,12 +462,12 @@ spinbutton {
 /* Report and tables */
 
 .kpi-card { min-height: 92px; }
-.kpi-value { font-size: 32px; font-weight: 500; }
+.kpi-value { font-size: 34px; font-weight: 400; }
 
 .kpi-badge {
   min-width: 32px;
   min-height: 32px;
-  border-radius: 8px;
+  border-radius: 9999px;
 }
 
 .kpi-badge.success { background-color: @success; color: @on_success; }
@@ -383,7 +482,7 @@ spinbutton {
 }
 
 .table-row {
-  padding: 10px 12px;
+  padding: 12px 12px;
   border-bottom: 1px solid @border_subtle;
 }
 
@@ -392,15 +491,168 @@ spinbutton {
 
 /* States and dialogs */
 
-.state-panel { padding: 36px 20px; }
-.state-title { font-size: 18px; font-weight: 500; }
+.state-panel { padding: 40px 20px; }
+.state-title { font-size: 19px; font-weight: 600; }
 
 .mission-prompt {
-  background-color: @bg_track;
-  border-radius: 12px;
-  padding: 16px;
+  background-color: @bg_surface;
+  border-radius: 20px;
+  padding: 18px;
   font-size: 18px;
   font-weight: 500;
 }
 
-.ringing-time { font-size: 44px; font-weight: 600; letter-spacing: 1px; }
+.ringing-time { font-size: 56px; font-weight: 300; }
+
+/* Welcome */
+
+/* White like the app icon's own background, so the icon sits on the page without a visible box. */
+.welcome { background-color: @bg_surface; }
+
+.welcome-page { padding: 8px 28px 4px 28px; }
+.welcome-title { font-size: 26px; font-weight: 600; }
+.welcome-art { color: @accent_text; }
+
+.welcome-art-well {
+  min-width: 112px;
+  min-height: 112px;
+  border-radius: 9999px;
+  background-color: @nav_active_bg;
+}
+
+/* Editor pages: Create and Edit open in place of a view, with Save pinned below the form. */
+
+.editor-top { padding: 4px 12px 0 12px; }
+.editor-top .section-title { font-size: 18px; }
+.editor-body { margin: 8px 16px 24px 16px; }
+.editor-footer { padding: 10px 16px 16px 16px; }
+
+button.editor-save {
+  min-height: 52px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.accent-value { color: @accent_text; font-weight: 500; }
+
+.title-icon { color: @accent_text; }
+
+/* Icon wells lead rows and options so each choice reads at a glance. */
+.row-icon,
+.option-icon {
+  min-width: 36px;
+  min-height: 36px;
+  border-radius: 9999px;
+  background-color: @nav_active_bg;
+  color: @nav_active_icon;
+}
+
+.option-icon { border-radius: 12px; }
+
+button.setting-row {
+  min-height: 56px;
+  padding: 6px 8px;
+  border-radius: 16px;
+  border: none;
+  box-shadow: none;
+  background-image: none;
+  background-color: transparent;
+  color: @text_primary;
+  font-weight: 400;
+}
+
+button.setting-row:hover { background-color: @bg_surface_elevated; }
+
+/* Option sheets: one flat card per choice, like the phone clock's snooze screen. */
+.option-section {
+  background-color: @bg_surface;
+  border-radius: 20px;
+  padding: 16px 18px;
+}
+
+.radio-list checkbutton {
+  min-height: 44px;
+  padding: 0 4px;
+}
+
+/* Adwaita's own radio and check outlines fall under 3:1, so both use the strong border token. */
+.radio-list radio,
+checkbutton.every-day check {
+  min-width: 20px;
+  min-height: 20px;
+  margin-right: 12px;
+  background-color: transparent;
+  background-image: none;
+  box-shadow: inset 0 0 0 2px @border_strong;
+}
+
+.radio-list radio:checked,
+checkbutton.every-day check:checked {
+  background-color: @control_fill;
+  box-shadow: none;
+  color: @on_accent;
+}
+
+button.more-options { padding: 0 8px; }
+
+button.secondary.round {
+  min-width: 44px;
+  padding: 0;
+}
+
+/* One wake-up mission slot: a dashed box holding a plus until a mission is chosen. */
+button.mission-slot {
+  min-width: 84px;
+  min-height: 84px;
+  padding: 0;
+  border-radius: 20px;
+  border: 2px dashed @border_strong;
+  box-shadow: none;
+  background-image: none;
+  background-color: transparent;
+  color: @text_secondary;
+}
+
+button.mission-slot:hover { background-color: @bg_surface_elevated; }
+
+button.mission-slot.filled {
+  border-style: solid;
+  border-color: @nav_active_icon;
+  background-color: @nav_active_bg;
+  color: @nav_active_icon;
+}
+
+.editor-top button image { -gtk-icon-size: 20px; }
+
+/* Picture tiles: mission count shown as repeated icons, difficulty as a level meter and a sample. */
+.choice-group.tiles button {
+  min-height: 84px;
+  padding: 10px 6px;
+  border-radius: 18px;
+  border: none;
+  box-shadow: none;
+  background-image: none;
+  background-color: @bg_surface_elevated;
+  color: @text_secondary;
+}
+
+.choice-group.tiles button:hover { background-color: @bg_track; }
+
+.choice-group.tiles button:checked {
+  background-color: @cobalt_bg;
+  color: @cobalt_text;
+}
+
+.tile-number { font-size: 26px; font-weight: 300; }
+
+.meter-bar {
+  border-radius: 3px;
+  background-color: alpha(currentColor, 0.25);
+}
+
+.meter-bar.on { background-color: currentColor; }
+
+/* Level colours reuse the success, rest, and alert pairs that already pass AA in both themes. */
+.choice-group.tiles button.option-easy:checked { background-color: @success_bg; color: @success_text; }
+.choice-group.tiles button.option-medium:checked { background-color: @rest_bg; color: @rest_text; }
+.choice-group.tiles button.option-hard:checked { background-color: @alert_bg; color: @alert_text; }

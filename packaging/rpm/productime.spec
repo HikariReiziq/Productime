@@ -51,8 +51,14 @@ EOF
 chmod 755 %{buildroot}%{_bindir}/%{name}
 
 install -d %{buildroot}%{_datadir}/applications
-sed 's|@EXEC@|%{name}|' packaging/%{app_id}.desktop.in \
+sed 's|@EXEC@|%{name}|g' packaging/%{app_id}.desktop.in \
     > %{buildroot}%{_datadir}/applications/%{app_id}.desktop
+
+install -D -p -m 644 packaging/%{app_id}.search-provider.ini \
+    %{buildroot}%{_datadir}/gnome-shell/search-providers/%{app_id}.search-provider.ini
+install -d %{buildroot}%{_datadir}/dbus-1/services
+sed 's|@EXEC@|%{_bindir}/%{name}|' packaging/%{app_id}.service.in \
+    > %{buildroot}%{_datadir}/dbus-1/services/%{app_id}.service
 
 for size in 64 128 256 512; do
     install -D -p -m 644 packaging/icons/hicolor/${size}x${size}/apps/%{app_id}.png \
@@ -68,4 +74,6 @@ desktop-file-validate %{buildroot}%{_datadir}/applications/%{app_id}.desktop
 %{_bindir}/%{name}
 %{_datadir}/%{name}/
 %{_datadir}/applications/%{app_id}.desktop
+%{_datadir}/gnome-shell/search-providers/%{app_id}.search-provider.ini
+%{_datadir}/dbus-1/services/%{app_id}.service
 %{_datadir}/icons/hicolor/*/apps/%{app_id}.png

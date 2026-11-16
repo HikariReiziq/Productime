@@ -17,7 +17,7 @@ from ...widgets.controls import (
     wrap_row,
 )
 from ...widgets.state_panels import StatePanel, ViewStates
-from .create_alarm_dialog import CreateAlarmDialog
+from .alarm_editor import AlarmEditor
 
 
 def mission_text(alarm: Alarm) -> str | None:
@@ -34,7 +34,6 @@ class AlarmView(Gtk.Box):
         self.window = window
         self.repo = window.app.repo
         self.scheduler = window.scheduler
-        self.dialog: CreateAlarmDialog | None = None
         self.cards: dict[str, dict] = {}
 
         self.summary_label = text_label("", "secondary", "numeric", wrap=True)
@@ -75,9 +74,15 @@ class AlarmView(Gtk.Box):
     def set_compact(self, compact: bool) -> None:
         pass
 
+    @property
+    def editor(self) -> AlarmEditor | None:
+        return self.window.editor_for("alarm")
+
     def create(self) -> None:
-        self.dialog = CreateAlarmDialog(self.window)
-        self.dialog.present(self.window)
+        if self.editor is not None:
+            self.window.navigate("alarm")
+            return
+        self.window.open_editor(AlarmEditor(self.window), self.create_button)
 
     def _render(self, alarms: list[Alarm]) -> None:
         clear_box(self.list_box)
@@ -180,8 +185,8 @@ class AlarmView(Gtk.Box):
         return False
 
     def edit(self, alarm: Alarm) -> None:
-        self.dialog = CreateAlarmDialog(self.window, alarm=alarm)
-        self.dialog.present(self.window)
+        opener = self.cards.get(alarm.id, {}).get("edit")
+        self.window.open_editor(AlarmEditor(self.window, alarm=alarm), opener)
 
     def ask_delete(self, alarm: Alarm) -> None:
         self.window.confirm(

@@ -9,7 +9,9 @@ from ....domain.formatters import format_duration
 from ...widgets.progress_ring import ThemedArea
 
 PAD_LEFT, PAD_RIGHT, PAD_TOP, PAD_BOTTOM = 46, 14, 34, 28
-SCALE_STEPS = (900, 1800, 3600, 7200, 10800, 14400, 21600, 28800, 43200, 86400)
+LABEL_GAP = 8
+# Each step splits into four whole-minute grid lines: 5m, 10m, 15m, 30m, 1h, and so on.
+SCALE_STEPS = (1200, 2400, 3600, 7200, 14400, 21600, 28800, 43200, 86400)
 GRID_LINES = 4
 
 
@@ -21,6 +23,11 @@ def scale_top(max_seconds: int) -> int:
     return ((max_seconds // 86400) + 1) * 86400
 
 
+def plot_left(label_widths: Sequence[float]) -> float:
+    """Left edge of the plot, far enough right that the widest axis label is never clipped."""
+    return max(PAD_LEFT, max(label_widths, default=0) + LABEL_GAP + 2)
+
+
 class ProductivityChart(ThemedArea):
     def __init__(self, theme, on_focus: Callable[[int | None], None] | None = None):
         super().__init__(theme, accessible_role=Gtk.AccessibleRole.IMG)
@@ -29,6 +36,7 @@ class ProductivityChart(ThemedArea):
         self._label_every = 1
         self._on_focus = on_focus
         self.focus_index: int | None = None
+        self._left: float = PAD_LEFT
         self.set_content_height(320)
         self.set_hexpand(True)
         self.set_focusable(True)
@@ -56,11 +64,11 @@ class ProductivityChart(ThemedArea):
 
     def index_at(self, x: float) -> int | None:
         count = len(self._values)
-        plot_width = self.get_width() - PAD_LEFT - PAD_RIGHT
+        plot_width = self.get_width() - self._left - PAD_RIGHT
         if count == 0 or plot_width <= 0:
             return None
         step = plot_width / max(1, count - 1)
-        return max(0, min(count - 1, round((x - PAD_LEFT) / step)))
+        return max(0, min(count - 1, round((x - self._left) / step)))
 
     def set_focus_index(self, index: int | None) -> None:
         if index == self.focus_index:
@@ -116,36 +124,36 @@ class ProductivityChart(ThemedArea):
         PangoCairo.show_layout(cr, layout)
         return width, height
 
+    def _label_width(self, text: str) -> int:
+        return self.numeric_layout(text, 11, Pango.Weight.NORMAL).get_pixel_size()[0]
+
     def _draw(self, _area, cr, width, height) -> None:
         theme = self.theme
         count = len(self._values)
-        plot_width = width - PAD_LEFT - PAD_RIGHT
-        plot_height = height - PAD_TOP - PAD_BOTTOM
-        if count == 0 or plot_width <= 0 or plot_height <= 0:
+        if count == 0:
             return
         top = scale_top(max(self._values))
+        axis = [format_duration(top * line // GRID_LINES) for line in range(GRID_LINES + 1)]
+        left = self._left = plot_left([self._label_width(text) for text in axis])
+        plot_width = width - left - PAD_RIGHT
+        plot_height = height - PAD_TOP - PAD_BOTTOM
+        if plot_width <= 0 or plot_height <= 0:
+            return
         baseline = PAD_TOP + plot_height
         step = plot_width / max(1, count - 1)
 
         def point(index: int) -> tuple[float, float]:
-            return PAD_LEFT + step * index, baseline - plot_height * (self._values[index] / top)
+            return left + step * index, baseline - plot_height * (self._values[index] / top)
 
         cr.set_line_width(1)
         for line in range(GRID_LINES + 1):
             y = baseline - plot_height * line / GRID_LINES
             cr.set_source_rgba(*theme.rgb("text_muted"), 0.35)
             cr.set_dash([4, 4] if line else [])
-            cr.move_to(PAD_LEFT, y + 0.5)
+            cr.move_to(left, y + 0.5)
             cr.line_to(width - PAD_RIGHT, y + 0.5)
             cr.stroke()
-            self._text(
-                cr,
-                format_duration(top * line // GRID_LINES),
-                PAD_LEFT - 8,
-                y - 8,
-                "text_secondary",
-                align=1.0,
-            )
+            self._text(cr, axis[line], left - LABEL_GAP, y - 8, "text_secondary", align=1.0)
         cr.set_dash([])
 
         for index, label in enumerate(self._labels):
@@ -160,10 +168,7 @@ class ProductivityChart(ThemedArea):
             middle = (x0 + x1) / 2
             cr.curve_to(middle, y0, middle, y1, x1, y1)
             x0, y0 = x1, y1
-        gradient = cairo.LinearGradient(PAD_LEFT, 0, width - PAD_RIGHT, 0)
-        gradient.add_color_stop_rgb(0, *theme.rgb("ring_start"))
-        gradient.add_color_stop_rgb(1, *theme.rgb("ring_end"))
-        cr.set_source(gradient)
+        cr.set_source_rgb(*theme.rgb("ring"))
         cr.set_line_width(3)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
         cr.stroke()
@@ -179,17 +184,17 @@ class ProductivityChart(ThemedArea):
         cr.move_to(x + 0.5, PAD_TOP)
         cr.line_to(x + 0.5, baseline)
         cr.stroke()
-        cr.set_source_rgba(*theme.rgb("ring_start"), 0.25)
+        cr.set_source_rgba(*theme.rgb("ring"), 0.22)
         cr.arc(x, y, 9, 0, 6.2832)
         cr.fill()
-        cr.set_source_rgb(*theme.rgb("ring_end"))
+        cr.set_source_rgb(*theme.rgb("ring"))
         cr.arc(x, y, 4.5, 0, 6.2832)
         cr.fill()
 
         layout = self.numeric_layout(self.describe(self.focus_index), 12, Pango.Weight.MEDIUM)
         text_width, text_height = layout.get_pixel_size()
         box_width, box_height = text_width + 16, text_height + 8
-        box_x = max(PAD_LEFT, min(width - PAD_RIGHT - box_width, x - box_width / 2))
+        box_x = max(self._left, min(width - PAD_RIGHT - box_width, x - box_width / 2))
         box_y = 2
         cr.set_source_rgb(*theme.rgb("bg_surface_elevated"))
         cr.rectangle(box_x, box_y, box_width, box_height)

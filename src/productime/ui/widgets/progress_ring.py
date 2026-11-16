@@ -9,12 +9,7 @@ from gi.repository import Gtk, Pango, PangoCairo
 ARC_START = math.radians(120)
 ARC_SWEEP = math.radians(300)
 
-TONES = {
-    "focus": ("ring_start", "ring_end"),
-    "rest": ("rest_text", "rest_text"),
-    "alert": ("alert_text", "alert_text"),
-    "idle": ("text_muted", "text_muted"),
-}
+TONES = {"focus": "ring", "rest": "rest_text", "alert": "alert_text", "idle": "text_muted"}
 
 
 class ThemedArea(Gtk.DrawingArea):
@@ -84,17 +79,11 @@ class ProgressRing(ThemedArea):
         cr.stroke()
 
         if self._fraction > 0:
-            start_token, end_token = TONES[self._tone]
-            gradient = cairo.LinearGradient(
-                center_x - radius, center_y - radius, center_x + radius, center_y + radius
-            )
-            gradient.add_color_stop_rgb(0, *theme.rgb(start_token))
-            gradient.add_color_stop_rgb(1, *theme.rgb(end_token))
-            cr.set_source(gradient)
+            cr.set_source_rgb(*theme.rgb(TONES[self._tone]))
             cr.arc(center_x, center_y, radius, ARC_START, ARC_START + ARC_SWEEP * self._fraction)
             cr.stroke()
 
-        layout = self.numeric_layout(self._text, self._text_px, Pango.Weight.SEMIBOLD)
+        layout = self.numeric_layout(self._text, self._text_px, Pango.Weight.LIGHT)
         text_width, text_height = layout.get_pixel_size()
         offset = self._text_px * 0.28 if self._caption else 0
         cr.set_source_rgb(*theme.rgb("text_primary"))

@@ -6,10 +6,20 @@ from ....domain.formatters import format_hm, format_hms
 from ....domain.models import Target, TargetPhase
 from ....domain.target_engine import InvalidTransition
 from ....services.scheduler_service import SchedulerError
-from ...widgets.controls import chip, clear_box, hbox, icon_button, make_button, text_label, vbox, wrap_row
+from ...widgets.controls import (
+    chip,
+    clear_box,
+    hbox,
+    icon_button,
+    make_button,
+    tag_style,
+    text_label,
+    vbox,
+    wrap_row,
+)
 from ...widgets.state_panels import StatePanel, ViewStates
-from .create_target_dialog import CreateTargetDialog
 from .focus_target_view import PHASE_TEXT, FocusTargetView
+from .target_editor import TargetEditor
 
 _PAUSED = (TargetPhase.PAUSED_WORK, TargetPhase.PAUSED_REST)
 
@@ -20,7 +30,6 @@ class TodayView(Gtk.Box):
         self.window = window
         self.repo = window.app.repo
         self.scheduler = window.scheduler
-        self.dialog: CreateTargetDialog | None = None
         self.rows: dict[str, dict] = {}
         self._targets: list[Target] = []
 
@@ -101,9 +110,17 @@ class TodayView(Gtk.Box):
     def set_compact(self, compact: bool) -> None:
         self.focus_view.set_compact(compact)
 
+    @property
+    def editor(self) -> TargetEditor | None:
+        return self.window.editor_for("today")
+
     def create(self) -> None:
-        self.dialog = CreateTargetDialog(self.window, on_saved=lambda _t: self.reload())
-        self.dialog.present(self.window)
+        if self.editor is not None:
+            self.window.navigate("today")
+            return
+        self.show_list()
+        editor = TargetEditor(self.window, on_saved=lambda _t: self.reload())
+        self.window.open_editor(editor, self.create_button)
 
     def _render(self, targets: list[Target]) -> None:
         self._targets = targets
@@ -129,7 +146,7 @@ class TodayView(Gtk.Box):
             self.hero_name.set_text(target.name)
             self.hero_time.set_text(format_hms(state.remaining_ms / 1000))
             self.hero_detail.set_text(session.batch.subtask_title)
-            self.hero_chips.append(chip(target.tag_label, target.tag_label.lower()))
+            self.hero_chips.append(chip(target.tag_label, tag_style(target.tag_color)))
             self.hero_chips.append(chip(f"Batch {state.batch_index} of {state.batch_count}"))
             self.hero_chips.append(chip(PHASE_TEXT[state.phase]))
             self.hero_button.set_label("Resume Focus" if state.phase in _PAUSED else "Open Focus")
@@ -141,7 +158,7 @@ class TodayView(Gtk.Box):
         self.hero_name.set_text(target.name)
         self.hero_time.set_text(format_hms(target.total_timeline_minutes * 60))
         self.hero_detail.set_text("Projected total, including breaks and long rests.")
-        self.hero_chips.append(chip(target.tag_label, target.tag_label.lower()))
+        self.hero_chips.append(chip(target.tag_label, tag_style(target.tag_color)))
         self.hero_chips.append(chip(f"{len(target.batches)} batches"))
         self.hero_button.set_label("Start Again" if target.status == "completed" else "Start Focus")
         # The dot marks a live session, so it is hidden while nothing is running.
@@ -155,12 +172,12 @@ class TodayView(Gtk.Box):
         return chip("Planned")
 
     def _build_row(self, target: Target) -> Gtk.Box:
-        well = text_label(target.tag_label[:1], "icon-well", target.tag_label.lower(), xalign=0.5)
+        well = text_label(target.tag_label[:1].upper(), "icon-well", tag_style(target.tag_color), xalign=0.5)
         well.set_valign(Gtk.Align.CENTER)
         name = text_label(target.name, "card-title", ellipsize=True)
         total = text_label(f"{format_hm(target.total_timeline_minutes)} total", "secondary", "numeric")
         chips = wrap_row(
-            chip(target.tag_label, target.tag_label.lower()),
+            chip(target.tag_label, tag_style(target.tag_color)),
             chip(f"{len(target.batches)} batches"),
             self._status_chip(target),
             spacing=6,
@@ -209,8 +226,8 @@ class TodayView(Gtk.Box):
         self.show_focus()
 
     def edit_target(self, target: Target) -> None:
-        self.dialog = CreateTargetDialog(self.window, target=target, on_saved=lambda _t: self.reload())
-        self.dialog.present(self.window)
+        editor = TargetEditor(self.window, target=target, on_saved=lambda _t: self.reload())
+        self.window.open_editor(editor, self.rows.get(target.id, {}).get("edit"))
 
     def ask_delete(self, target: Target) -> None:
         self.window.confirm(

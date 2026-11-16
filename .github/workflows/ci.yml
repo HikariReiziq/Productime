@@ -41,7 +41,8 @@ jobs:
         run: su ci -c "python3 -m unittest discover -s tests/unit -v"
 
       - name: Integration tests
-        run: su ci -c "python3 -m unittest discover -s tests/integration -v"
+        # The search provider tests talk to a real session bus, which a container does not have.
+        run: su ci -c "dbus-run-session -- python3 -m unittest discover -s tests/integration -v"
 
       - name: Native GTK 4 UI tests (headless)
         run: su ci -c 'export XDG_RUNTIME_DIR="$(mktemp -d)" && scripts/run-ui-tests.sh'

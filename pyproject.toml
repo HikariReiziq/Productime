@@ -1,6 +1,6 @@
 [project]
 name = "productime"
-version = "1.0.0"
+version = "1.1.0"
 description = "Lightweight native Fedora Linux focus timer, alarm, stopwatch, and productivity report."
 readme = "README.md"
 license = "MIT"

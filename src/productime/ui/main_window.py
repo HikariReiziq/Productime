@@ -1,4 +1,4 @@
-"""Adaptive shell: left rail or bottom bar, alert recovery bar, settings, and backup actions."""
+"""Adaptive shell: icon rail or bottom bar, live session pill, alert recovery bar, and backup actions."""
 
 import sqlite3
 from pathlib import Path
@@ -11,12 +11,9 @@ from ..paths import APP_ID, APP_NAME, brand_icon_path
 from ..services import backup_service
 from ..services.backup_service import BackupError
 from .widgets.controls import (
-    AppDialog,
     hbox,
-    icon_button,
     make_button,
     set_accessible_label,
-    switch_row,
     text_label,
     vbox,
 )
@@ -70,11 +67,15 @@ class ProductimeWindow(Adw.ApplicationWindow):
         self.last_confirm: Adw.AlertDialog | None = None
         self.last_error: Adw.AlertDialog | None = None
         self.last_toast: str | None = None
-        self.settings_dialog: AppDialog | None = None
+        self.settings_dialog = None
+        self.welcome_dialog = None
         self._views: dict[str, Gtk.Widget] = {}
+        self._editors: dict[str, Gtk.Widget] = {}
         self._rail_buttons: dict[str, Gtk.ToggleButton] = {}
         self._bottom_buttons: dict[str, Gtk.ToggleButton] = {}
-        self._settings_controls: list[dict] = []
+        self._theme_buttons: list[Gtk.Button] = []
+        self._pin_buttons: list[Gtk.ToggleButton] = []
+        self._settings_buttons: list[Gtk.Button] = []
         self._syncing = False
         self._tick_id = 0
         self._alert_key: str | None = None
@@ -91,9 +92,10 @@ class ProductimeWindow(Adw.ApplicationWindow):
         self.set_size_request(420, 560)
         self._build()
         self._install_actions()
+        self._sync_tools()
 
         app.audio.on_error = self.toast
-        app.theme.subscribe(self._sync_settings)
+        app.theme.subscribe(self._sync_tools)
         self.scheduler.subscribe(self._on_scheduler_changed)
         self.connect("close-request", self._on_close_request)
         self.connect("map", lambda _w: self.update_tick())
@@ -113,15 +115,24 @@ class ProductimeWindow(Adw.ApplicationWindow):
         self.bottom_bar = self._build_bottom_bar()
         self.bottom_bar.set_visible(False)
 
-        self.compact_brand = hbox(8, self._brand_image(24), text_label(APP_NAME, "brand-title"))
+        self.compact_brand_label = text_label(APP_NAME, "brand-title")
+        self.compact_brand = hbox(8, self._brand_image(24), self.compact_brand_label)
         self.compact_brand.set_visible(False)
-        self.settings_button = icon_button(
-            "open-menu-symbolic", "Settings and data", on_click=self.open_settings_dialog
-        )
-        self.settings_button.set_visible(False)
+        self.live_dot = Gtk.Box(valign=Gtk.Align.CENTER)
+        self.live_dot.add_css_class("status-dot")
+        self.live_label = text_label("", "numeric", ellipsize=True)
+        self.live_label.set_max_width_chars(36)
+        self.live_pill = Gtk.Button(child=hbox(8, self.live_dot, self.live_label))
+        self.live_pill.add_css_class("live-pill")
+        self.live_pill.set_tooltip_text("Open the running session")
+        self.live_pill.connect("clicked", lambda _b: self._open_live_session())
+        self.live_pill.set_visible(False)
+        self.header_tools = hbox(2, *self._tool_buttons())
+        self.header_tools.add_css_class("header-tools")
+        self.header_tools.set_visible(False)
         header = Adw.HeaderBar()
-        header.set_title_widget(self.compact_brand)
-        header.pack_end(self.settings_button)
+        header.set_title_widget(hbox(10, self.compact_brand, self.live_pill))
+        header.pack_end(self.header_tools)
 
         self.stack = Gtk.Stack()
         self.stack.set_transition_type(Gtk.StackTransitionType.NONE)
@@ -130,16 +141,22 @@ class ProductimeWindow(Adw.ApplicationWindow):
         self.stack.set_hhomogeneous(False)
         self.page = Adw.Clamp(maximum_size=1120)
         self.page.set_child(self.stack)
-        for edge, value in (("top", 24), ("bottom", 32), ("start", 24), ("end", 24)):
+        for edge, value in (("top", 12), ("bottom", 32), ("start", 28), ("end", 28)):
             getattr(self.page, f"set_margin_{edge}")(value)
         scroller = Gtk.ScrolledWindow()
         scroller.set_policy(Gtk.PolicyType.NEVER, Gtk.PolicyType.AUTOMATIC)
         scroller.set_vexpand(True)
         scroller.set_child(self.page)
+        self.views_page = scroller
+
+        # Create and Edit pages replace the view beside the rail, each with its own scrolling and footer.
+        self.content = Gtk.Stack(vexpand=True, hhomogeneous=False, vhomogeneous=False)
+        self.content.set_transition_type(Gtk.StackTransitionType.NONE)
+        self.content.add_named(scroller, "views")
 
         main = Adw.ToolbarView()
         main.add_top_bar(header)
-        main.set_content(vbox(0, self.alert_bar, scroller))
+        main.set_content(vbox(0, self.alert_bar, self.content))
         main.set_hexpand(True)
 
         body = hbox(0, self.rail, main)
@@ -153,7 +170,7 @@ class ProductimeWindow(Adw.ApplicationWindow):
         breakpoint_.add_setter(self.rail, "visible", False)
         breakpoint_.add_setter(self.bottom_bar, "visible", True)
         breakpoint_.add_setter(self.compact_brand, "visible", True)
-        breakpoint_.add_setter(self.settings_button, "visible", True)
+        breakpoint_.add_setter(self.header_tools, "visible", True)
         breakpoint_.add_setter(self.page, "margin-start", 16)
         breakpoint_.add_setter(self.page, "margin-end", 16)
         breakpoint_.add_setter(self.page, "margin-top", 16)
@@ -163,44 +180,61 @@ class ProductimeWindow(Adw.ApplicationWindow):
 
     def _brand_image(self, size: int) -> Gtk.Image:
         image = Gtk.Image(accessible_role=Gtk.AccessibleRole.PRESENTATION)
-        image.set_from_file(str(brand_icon_path()))
+        image.set_from_file(str(brand_icon_path(size)))
         image.set_pixel_size(size)
         image.add_css_class("brand-mark")
         image.set_overflow(Gtk.Overflow.HIDDEN)
         return image
 
-    def _nav_button(self, name: str, title: str, icon: str, vertical: bool) -> Gtk.ToggleButton:
-        orientation = Gtk.Orientation.VERTICAL if vertical else Gtk.Orientation.HORIZONTAL
-        content = Gtk.Box(orientation=orientation, spacing=2 if vertical else 12)
-        if vertical:
-            content.set_halign(Gtk.Align.CENTER)
-        content.append(Gtk.Image.new_from_icon_name(icon))
-        content.append(text_label(title, xalign=0.5 if vertical else 0.0))
-        button = Gtk.ToggleButton()
-        button.set_child(content)
-        button.add_css_class("nav-item")
+    def _nav_button(self, name: str, title: str, icon: str) -> Gtk.ToggleButton:
+        """Icon-only navigation. The name shows as a tooltip and is the accessible label."""
+        button = Gtk.ToggleButton(icon_name=icon, halign=Gtk.Align.CENTER, valign=Gtk.Align.CENTER)
+        button.add_css_class("rail-item")
+        button.set_tooltip_text(title)
         set_accessible_label(button, title)
         button.connect("toggled", self._on_nav_toggled, name)
         return button
 
+    def _tool_buttons(self) -> tuple[Gtk.Widget, ...]:
+        """Theme, keep-running, and Settings icons. Built for the rail and for the compact header."""
+        theme = Gtk.Button(halign=Gtk.Align.CENTER)
+        theme.add_css_class("rail-tool")
+        theme.connect("clicked", lambda _b: self.toggle_theme())
+        pin = Gtk.ToggleButton(icon_name="productime-pin-symbolic", halign=Gtk.Align.CENTER)
+        pin.add_css_class("rail-tool")
+        pin.connect("toggled", self._on_pin_toggled)
+        settings = Gtk.Button(icon_name="productime-settings-symbolic", halign=Gtk.Align.CENTER)
+        settings.add_css_class("rail-tool")
+        settings.set_tooltip_text("Settings")
+        set_accessible_label(settings, "Settings")
+        settings.connect("clicked", lambda _b: self.open_settings_dialog())
+        self._theme_buttons.append(theme)
+        self._pin_buttons.append(pin)
+        self._settings_buttons.append(settings)
+        return theme, pin, settings
+
     def _build_rail(self) -> Gtk.Box:
-        rail = vbox(6)
+        rail = vbox(0)
         rail.add_css_class("rail")
-        rail.set_size_request(232, -1)
+        rail.set_size_request(80, -1)
         # Children that expand would otherwise make the rail share the window's spare width.
         rail.set_hexpand(False)
-        brand = hbox(10, self._brand_image(32), text_label(APP_NAME, "brand-title"))
+        brand = self._brand_image(40)
+        brand.set_halign(Gtk.Align.CENTER)
+        brand.set_tooltip_text(APP_NAME)
         brand.set_margin_bottom(14)
-        brand.set_margin_start(4)
+        self.rail_brand = brand
         rail.append(brand)
 
         nav = Gtk.Box(
-            orientation=Gtk.Orientation.VERTICAL, spacing=4, accessible_role=Gtk.AccessibleRole.NAVIGATION
+            orientation=Gtk.Orientation.VERTICAL,
+            spacing=8,
+            accessible_role=Gtk.AccessibleRole.NAVIGATION,
         )
         set_accessible_label(nav, "Main navigation")
         first = None
         for name, title, icon in NAV_ITEMS:
-            button = self._nav_button(name, title, icon, vertical=False)
+            button = self._nav_button(name, title, icon)
             if first is None:
                 first = button
             else:
@@ -209,20 +243,13 @@ class ProductimeWindow(Adw.ApplicationWindow):
             nav.append(button)
         rail.append(nav)
 
-        self.mini_session = Gtk.Button()
-        self.mini_session.add_css_class("mini-session")
-        self.mini_title = text_label("", "body-strong", ellipsize=True)
-        self.mini_detail = text_label("", "secondary", "small", "numeric", ellipsize=True)
-        self.mini_session.set_child(vbox(2, self.mini_title, self.mini_detail))
-        self.mini_session.connect("clicked", lambda _b: self._open_live_session())
-        self.mini_session.set_margin_top(12)
-        self.mini_session.set_visible(False)
-        rail.append(self.mini_session)
-
-        spacer = Gtk.Box()
-        spacer.set_vexpand(True)
+        spacer = Gtk.Box(vexpand=True)
         rail.append(spacer)
-        rail.append(self._build_settings())
+        divider = Gtk.Box()
+        divider.add_css_class("rail-divider")
+        rail.append(divider)
+        self.rail_tools = vbox(6, *self._tool_buttons())
+        rail.append(self.rail_tools)
         return rail
 
     def _build_bottom_bar(self) -> Gtk.Box:
@@ -231,11 +258,11 @@ class ProductimeWindow(Adw.ApplicationWindow):
             homogeneous=True,
             accessible_role=Gtk.AccessibleRole.NAVIGATION,
         )
-        bar.add_css_class("bottom-bar")
+        bar.add_css_class("nav-bar")
         set_accessible_label(bar, "Main navigation")
         first = None
         for name, title, icon in NAV_ITEMS:
-            button = self._nav_button(name, title, icon, vertical=True)
+            button = self._nav_button(name, title, icon)
             if first is None:
                 first = button
             else:
@@ -243,69 +270,6 @@ class ProductimeWindow(Adw.ApplicationWindow):
             self._bottom_buttons[name] = button
             bar.append(button)
         return bar
-
-    def _build_settings(self) -> Gtk.Box:
-        """Theme, volume, and backup controls. Built once for the rail and once for the compact dialog."""
-        theme_switch = Gtk.Switch()
-        theme_switch.connect("notify::active", self._on_theme_switched)
-        background_switch = Gtk.Switch()
-        background_switch.set_tooltip_text(
-            "When on, closing the window keeps running timers, targets, and alarms alive."
-        )
-        background_switch.connect("notify::active", self._on_background_switched)
-
-        mute_button = Gtk.ToggleButton()
-        mute_button.set_icon_name("audio-volume-high-symbolic")
-        mute_button.add_css_class("ghost")
-        mute_button.set_tooltip_text("Mute sound")
-        set_accessible_label(mute_button, "Mute sound")
-        mute_button.connect("toggled", self._on_mute_toggled)
-        scale = Gtk.Scale.new_with_range(Gtk.Orientation.HORIZONTAL, 0, 100, 5)
-        scale.set_draw_value(False)
-        scale.set_hexpand(True)
-        scale.set_size_request(-1, 44)
-        set_accessible_label(scale, "Sound volume")
-        scale.connect("value-changed", self._on_volume_changed)
-
-        save_button = make_button(
-            "Save Backup", "ghost", on_click=self.request_save_backup, icon="document-save-symbolic"
-        )
-        restore_button = make_button(
-            "Restore Backup", "ghost", on_click=self.request_restore, icon="document-revert-symbolic"
-        )
-        folder_button = make_button(
-            "Open Data Folder", "ghost", on_click=self.open_data_folder, icon="folder-open-symbolic"
-        )
-        for button in (save_button, restore_button, folder_button):
-            button.set_halign(Gtk.Align.START)
-
-        box = vbox(
-            4,
-            switch_row("Dark mode", theme_switch),
-            switch_row("Keep running when closed", background_switch),
-            hbox(4, mute_button, scale),
-            text_label("Data & Backup", "field-label"),
-            save_button,
-            restore_button,
-            folder_button,
-        )
-        box.add_css_class("settings-group")
-        controls = {
-            "box": box,
-            "theme": theme_switch,
-            "background": background_switch,
-            "mute": mute_button,
-            "scale": scale,
-            "save": save_button,
-            "restore": restore_button,
-            "folder": folder_button,
-        }
-        self._settings_controls.append(controls)
-        self._sync_settings()
-        return box
-
-    def settings_controls(self, index: int = 0) -> dict:
-        return self._settings_controls[index]
 
     def _install_actions(self) -> None:
         nav = Gio.SimpleAction.new("nav", GLib.VariantType.new("s"))
@@ -342,6 +306,15 @@ class ProductimeWindow(Adw.ApplicationWindow):
 
         return ReportView(self)
 
+    def theme_button(self, compact: bool = False) -> Gtk.Button:
+        return self._theme_buttons[1 if compact else 0]
+
+    def pin_button(self, compact: bool = False) -> Gtk.ToggleButton:
+        return self._pin_buttons[1 if compact else 0]
+
+    def settings_icon(self, compact: bool = False) -> Gtk.Button:
+        return self._settings_buttons[1 if compact else 0]
+
     def nav_button(self, name: str, bottom: bool = False) -> Gtk.ToggleButton:
         return (self._bottom_buttons if bottom else self._rail_buttons)[name]
 
@@ -353,12 +326,15 @@ class ProductimeWindow(Adw.ApplicationWindow):
             self._views[name] = created
         return self._views[name]
 
-    def navigate(self, name: str) -> None:
+    def navigate(self, name: str, show_editor: bool = True) -> None:
+        """Show a view, or the Create or Edit page left open on it so a draft is never lost."""
         if name not in {item[0] for item in NAV_ITEMS}:
             return
         target = self.view(name)
         self.current = name
         self.stack.set_visible_child_name(name)
+        editor = self._editors.get(name) if show_editor else None
+        self.content.set_visible_child(editor or self.views_page)
         self._syncing = True
         self._rail_buttons[name].set_active(True)
         self._bottom_buttons[name].set_active(True)
@@ -372,8 +348,43 @@ class ProductimeWindow(Adw.ApplicationWindow):
 
     def _set_compact(self, compact: bool) -> None:
         self.compact = compact
-        for view in self._views.values():
+        for view in (*self._views.values(), *self._editors.values()):
             view.set_compact(compact)
+
+    def editor_for(self, view_name: str):
+        return self._editors.get(view_name)
+
+    def open_editor(self, page, opener: Gtk.Widget | None = None) -> None:
+        """Show a Create or Edit page in place of its view. One page per view; a newer one replaces it."""
+        name = page.view_name
+        old = self._editors.pop(name, None)
+        if old is not None and old is not page:
+            self.content.remove(old)
+        page.opener = opener
+        page.set_compact(self.compact)
+        self._editors[name] = page
+        if page.get_parent() is None:
+            self.content.add_named(page, f"editor-{name}")
+        self.navigate(name)
+        page.focus_first()
+
+    def close_editor(self, view_name: str) -> None:
+        page = self._editors.pop(view_name, None)
+        if page is None:
+            return
+        showing = self.content.get_visible_child() is page
+        if showing:
+            self.content.set_visible_child(self.views_page)
+        self.content.remove(page)
+        if not showing:
+            return
+        # Focus goes back to the button that opened the page, or to Create when that row is gone.
+        view = self._views.get(view_name)
+        opener = page.opener
+        if opener is None or opener.get_root() is not self or not opener.get_mapped():
+            opener = getattr(view, "create_button", None)
+        if opener is not None:
+            opener.grab_focus()
 
     def reload_views(self) -> None:
         for view in self._views.values():
@@ -397,12 +408,12 @@ class ProductimeWindow(Adw.ApplicationWindow):
         view = self._views.get(self.current or "")
         if view is not None:
             view.tick()
-        self._update_mini_session()
+        self._update_live_pill()
 
     def _on_scheduler_changed(self) -> None:
         for view in self._views.values():
             view.on_scheduler_changed()
-        self._update_mini_session()
+        self._update_live_pill()
         self._sync_alert_ui()
         self.update_tick()
         done = self.scheduler.last_completed_target
@@ -412,31 +423,34 @@ class ProductimeWindow(Adw.ApplicationWindow):
         elif done is None:
             self._announced_target = None
 
-    def _update_mini_session(self) -> None:
+    def _update_live_pill(self) -> None:
         session = self.scheduler.session
         running = [r for r in self.scheduler.timers.values() if r.status == "running"]
         if session is not None and session.state.phase is not TargetPhase.COMPLETED:
             state = session.state
-            self.mini_title.set_text(session.target.name)
-            self.mini_detail.set_text(
-                f"Batch {state.batch_index} of {state.batch_count}   "
-                f"{format_countdown(state.remaining_ms / 1000)}"
+            text = (
+                f"{session.target.name}  \u00b7  Batch {state.batch_index}/{state.batch_count}  "
+                f"\u00b7  {format_countdown(state.remaining_ms / 1000)}"
             )
-            self.mini_session.set_visible(True)
         elif running:
             run = min(running, key=lambda r: r.remaining_ms)
-            self.mini_title.set_text(run.name)
-            self.mini_detail.set_text(f"Timer   {format_countdown(run.remaining_ms / 1000)}")
-            self.mini_session.set_visible(True)
+            text = f"{run.name}  \u00b7  {format_countdown(run.remaining_ms / 1000)}"
         else:
-            self.mini_session.set_visible(False)
+            self.live_pill.set_visible(False)
+            self.compact_brand_label.set_visible(True)
+            return
+        self.live_label.set_text(text)
+        set_accessible_label(self.live_pill, f"Running: {text}")
+        self.live_pill.set_visible(True)
+        # A narrow header has room for the session or the app name, and the session matters more.
+        self.compact_brand_label.set_visible(False)
 
     def _open_live_session(self) -> None:
         if self.scheduler.session is not None:
-            self.navigate("today")
+            self.navigate("today", show_editor=False)
             self.view("today").show_focus()
         else:
-            self.navigate("timer")
+            self.navigate("timer", show_editor=False)
 
     def _sync_alert_ui(self) -> None:
         alert = self.scheduler.current_alert()
@@ -499,61 +513,64 @@ class ProductimeWindow(Adw.ApplicationWindow):
             self._open_alert_dialog(alert)
             self._update_alert_bar()
 
-    def _sync_settings(self) -> None:
+    def _sync_tools(self) -> None:
+        dark = self.app.theme.dark
+        theme_icon = "productime-sun-symbolic" if dark else "productime-moon-symbolic"
+        theme_tip = "Switch to light mode" if dark else "Switch to dark mode"
+        for button in self._theme_buttons:
+            button.set_icon_name(theme_icon)
+            button.set_tooltip_text(theme_tip)
+            set_accessible_label(button, theme_tip)
+        keep = self.keep_running_when_closed()
+        pin_tip = (
+            "Keep running when closed: on. Alarms and timers keep working after you close the window."
+            if keep
+            else "Keep running when closed: off. Closing the window quits Productime."
+        )
         self._syncing = True
-        for controls in self._settings_controls:
-            controls["theme"].set_active(self.app.theme.dark)
-            controls["background"].set_active(self._keep_running_when_closed())
-            controls["mute"].set_active(self.app.audio.muted)
-            controls["mute"].set_icon_name(
-                "audio-volume-muted-symbolic" if self.app.audio.muted else "audio-volume-high-symbolic"
-            )
-            controls["scale"].set_value(self.app.audio.volume)
+        for button in self._pin_buttons:
+            button.set_active(keep)
+            button.set_tooltip_text(pin_tip)
+            set_accessible_label(button, "Keep running when closed")
         self._syncing = False
 
-    def _keep_running_when_closed(self) -> bool:
+    def keep_running_when_closed(self) -> bool:
         return self.app.repo.get_pref("close_to_background", "1") == "1"
 
-    def _on_background_switched(self, switch: Gtk.Switch, _param) -> None:
-        if self._syncing:
-            return
-        self.app.repo.set_pref("close_to_background", "1" if switch.get_active() else "0")
-        self._sync_settings()
+    def set_keep_running(self, keep: bool) -> None:
+        self.app.repo.set_pref("close_to_background", "1" if keep else "0")
+        self.app.update_hold()
+        self._sync_tools()
+        if self.settings_dialog is not None:
+            self.settings_dialog.sync()
 
-    def _on_theme_switched(self, switch: Gtk.Switch, _param) -> None:
-        if self._syncing:
-            return
-        self.app.theme.set_dark(switch.get_active())
-        self._sync_settings()
+    def toggle_theme(self) -> None:
+        self.app.theme.set_dark(not self.app.theme.dark)
 
-    def _on_mute_toggled(self, button: Gtk.ToggleButton) -> None:
-        if self._syncing:
-            return
-        self.app.audio.set_muted(button.get_active())
-        self.app.repo.set_pref("muted", "1" if button.get_active() else "0")
-        self._sync_settings()
-
-    def _on_volume_changed(self, scale: Gtk.Scale) -> None:
-        value = int(scale.get_value())
-        if self._syncing or value == self.app.audio.volume:
-            return
-        self.app.audio.set_volume(value)
-        self.app.repo.set_pref("volume", str(value))
-        self._sync_settings()
+    def _on_pin_toggled(self, button: Gtk.ToggleButton) -> None:
+        if not self._syncing:
+            self.set_keep_running(button.get_active())
 
     def open_settings_dialog(self) -> None:
-        dialog = AppDialog("Settings and data", width=380)
-        box = self._build_settings()
-        controls = self._settings_controls[-1]
-        dialog.body.append(box)
-        dialog.connect("closed", lambda _d: self._forget_settings(controls))
+        from .settings_dialog import SettingsDialog
+
+        dialog = SettingsDialog(self)
+        dialog.connect("closed", self._on_settings_closed)
         self.settings_dialog = dialog
         dialog.present(self)
 
-    def _forget_settings(self, controls: dict) -> None:
-        if controls in self._settings_controls:
-            self._settings_controls.remove(controls)
-        self.settings_dialog = None
+    def _on_settings_closed(self, dialog) -> None:
+        dialog.teardown()
+        if self.settings_dialog is dialog:
+            self.settings_dialog = None
+
+    def open_welcome(self) -> None:
+        from .welcome_dialog import WelcomeDialog
+
+        dialog = WelcomeDialog(self)
+        dialog.connect("closed", lambda _d: setattr(self, "welcome_dialog", None))
+        self.welcome_dialog = dialog
+        dialog.present(self)
 
     def request_save_backup(self) -> None:
         name = f"productime-backup-{self.app.clock.now():%Y%m%d}.json"
@@ -591,7 +608,9 @@ class ProductimeWindow(Adw.ApplicationWindow):
         self.app.apply_preferences()
         self.scheduler.reset_runtime()
         self.reload_views()
-        self._sync_settings()
+        self._sync_tools()
+        if self.settings_dialog is not None:
+            self.settings_dialog.sync()
         self.toast("Backup restored.")
 
     def open_data_folder(self) -> None:
@@ -636,7 +655,7 @@ class ProductimeWindow(Adw.ApplicationWindow):
 
     def _on_close_request(self, _window) -> bool:
         """Closing hides the window while timers or alarms still need the process alive."""
-        if not (self._keep_running_when_closed() and self.scheduler.has_background_work()):
+        if not (self.keep_running_when_closed() and self.scheduler.has_background_work()):
             self.teardown()
             return False
         self.set_visible(False)
@@ -646,6 +665,7 @@ class ProductimeWindow(Adw.ApplicationWindow):
                 "background",
                 f"{APP_NAME} is still running",
                 "Timers and alarms keep working. Open Productime again to bring the window back.",
+                buttons=((f"Open {APP_NAME}", "app.present", None),),
             )
         return True
 
@@ -656,7 +676,7 @@ class ProductimeWindow(Adw.ApplicationWindow):
         references alive, so cleanup cannot wait for that signal.
         """
         self.scheduler.unsubscribe(self._on_scheduler_changed)
-        self.app.theme.unsubscribe(self._sync_settings)
+        self.app.theme.unsubscribe(self._sync_tools)
         if self._tick_id:
             GLib.source_remove(self._tick_id)
             self._tick_id = 0

@@ -5,3 +5,10 @@ dist/
 build/
 *.egg-info/
 .venv/
+
+# Local planning notes and agent instructions stay on this machine.
+CLAUDE.md
+DESIGN.md
+IMPLEMENTATION_PLAN.md
+PRD.md
+PROMPT_CLAUDE.md

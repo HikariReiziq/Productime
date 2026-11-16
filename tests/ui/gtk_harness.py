@@ -97,15 +97,24 @@ class FakeFileChooser:
 
 
 def text_of(widget) -> str:
-    """Caption of a button built with or without an icon."""
+    """Visible caption of a button, whether it holds a plain label, an icon and a label, or a row."""
     child = widget.get_child() if hasattr(widget, "get_child") else None
-    if child is not None and hasattr(child, "get_last_child") and child.get_last_child() is not None:
-        return child.get_last_child().get_text()
-    return widget.get_label() or ""
+    if isinstance(child, Gtk.Box):
+        texts, part = [], child.get_first_child()
+        while part is not None:
+            if isinstance(part, Gtk.Label) and part.get_visible() and part.get_text():
+                texts.append(part.get_text())
+            part = part.get_next_sibling()
+        return " ".join(texts)
+    if isinstance(child, Gtk.Label):
+        return child.get_text()
+    return (widget.get_label() or "") if hasattr(widget, "get_label") else ""
 
 
 class GtkAppTestCase(unittest.TestCase):
     window_size: tuple[int, int] | None = None
+    show_welcome = False
+    start_hidden = False
     _launches = 0
 
     @classmethod
@@ -139,8 +148,11 @@ class GtkAppTestCase(unittest.TestCase):
             notifier=self.notifier,
             file_chooser=self.chooser,
             window_size=self.window_size,
+            config_dir=self.tmp / "config",
+            show_welcome=self.show_welcome,
         )
         self.app.register(None)
+        self.app._start_hidden = self.start_hidden
         self.app.activate()
         pump(0.3)
         self.window = self.app.window
@@ -212,6 +224,79 @@ class GtkAppTestCase(unittest.TestCase):
         self.clock.advance(seconds)
         self.scheduler.poll()
         self.window.refresh_live()
+        pump(0.1)
+
+    def labels_under(self, widget) -> list:
+        return self.widgets_under(widget, Gtk.Label)
+
+    def images_under(self, widget) -> list:
+        return self.widgets_under(widget, Gtk.Image)
+
+    @staticmethod
+    def widgets_under(widget, kind) -> list:
+        """Every descendant of one widget type, in tree order."""
+        found, stack = [], [widget]
+        while stack:
+            current = stack.pop()
+            if isinstance(current, kind):
+                found.append(current)
+            children, child = [], current.get_first_child()
+            while child is not None:
+                children.append(child)
+                child = child.get_next_sibling()
+            stack.extend(reversed(children))
+        return found
+
+    def toggle(self, check) -> None:
+        """Flip a check button the way a click would: it must be on screen and enabled."""
+        self.assertTrue(check.get_mapped() and check.is_sensitive())
+        check.set_active(not check.get_active())
+        pump(0.05)
+
+    def click_spin(self, spin_button, direction: str) -> None:
+        """Press the + or - button of a spin button."""
+        child = spin_button.get_first_child()
+        while child is not None:
+            if child.get_css_name() == "button" and child.has_css_class(direction):
+                self.assertTrue(child.get_mapped() and child.is_sensitive())
+                spin_button.spin(
+                    Gtk.SpinType.STEP_FORWARD if direction == "up" else Gtk.SpinType.STEP_BACKWARD, 1
+                )
+                pump(0.05)
+                return
+            child = child.get_next_sibling()
+        self.fail(f"no {direction} button")
+
+    def open_sheet(self, opener):
+        """Click a row or chip that opens an option sheet and return the sheet on screen."""
+        self.click(opener)
+        pump(0.3)
+        sheet = self.window.get_visible_dialog()
+        self.assertIsNotNone(sheet, f"{text_of(opener)!r} opened no sheet")
+        self.assertTrue(sheet.save_button.get_mapped())
+        return sheet
+
+    def open_editor(self, view_name: str):
+        """Press a view's Create button and return the editor page it opens."""
+        view = self.go(view_name)
+        self.click(view.create_button)
+        pump(0.3)
+        editor = view.editor
+        self.assertIsNotNone(editor)
+        self.assertTrue(editor.save_button.get_mapped())
+        return view, editor
+
+    def open_settings(self):
+        """Open Settings from the rail gear icon, as a user would."""
+        self.click(self.window.settings_icon(compact=self.window.compact))
+        pump(0.4)
+        dialog = self.window.settings_dialog
+        self.assertIsNotNone(dialog)
+        return dialog
+
+    def activate_row(self, row) -> None:
+        self.assertTrue(row.get_mapped(), f"row {row.get_title()!r} is not on screen")
+        row.emit("activated")
         pump(0.1)
 
     def go(self, name: str):

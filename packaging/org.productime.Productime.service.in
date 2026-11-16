@@ -1,0 +1,3 @@
+[D-BUS Service]
+Name=org.productime.Productime
+Exec=@EXEC@ --gapplication-service

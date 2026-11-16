@@ -1,4 +1,4 @@
-"""Source-level guards for the security and layering rules in CLAUDE.md."""
+"""Source-level guards for the security and layering rules of the project."""
 
 import ast
 import re
@@ -142,6 +142,45 @@ class LayeringTests(unittest.TestCase):
             for path in sorted((SRC / package).rglob("*.py")):
                 with self.subTest(file=f"{package}/{path.name}"):
                     self.assertFalse(self.packages_imported(path) & banned)
+
+
+class FocusStyleTests(unittest.TestCase):
+    """GTK 4 also marks every ancestor of the focused widget as focus-visible."""
+
+    def selectors(self):
+        css = (SRC / "ui" / "styles" / "base.css").read_text(encoding="utf-8")
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        for block in re.findall(r"([^{}]+)\{", css):
+            for selector in block.split(","):
+                yield selector.strip()
+
+    def test_focus_ring_targets_only_the_focused_widget(self):
+        offenders = [s for s in self.selectors() if ":focus-visible" in s and ":focus:focus-visible" not in s]
+
+        self.assertEqual(offenders, [], "use :focus:focus-visible so ancestors are not outlined too")
+
+    def test_only_containers_and_inner_text_nodes_may_drop_the_ring(self):
+        css = (SRC / "ui" / "styles" / "base.css").read_text(encoding="utf-8")
+        css = re.sub(r"/\*.*?\*/", "", css, flags=re.S)
+        allowed = {
+            "entry > text:focus:focus-visible",
+            "spinbutton > text:focus:focus-visible",
+            "sheet:focus:focus-visible",
+            "spinbutton.vertical:focus-within",
+        }
+        for selectors, body in re.findall(r"([^{}]+)\{([^}]*)\}", css):
+            if "outline: none" not in body:
+                continue
+            for selector in selectors.split(","):
+                with self.subTest(selector=selector.strip()):
+                    self.assertIn(selector.strip(), allowed)
+
+    def test_focus_within_is_limited_to_text_fields(self):
+        # A text field's focus sits on its inner text node, so the field itself needs :focus-within.
+        allowed = re.compile(r"^(entry|spinbutton)[.:\w-]*:focus-within$")
+        offenders = [s for s in self.selectors() if ":focus-within" in s and not allowed.match(s)]
+
+        self.assertEqual(offenders, [], ":focus-within on a container outlines everything around the field")
 
 
 if __name__ == "__main__":

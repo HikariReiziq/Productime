@@ -12,7 +12,7 @@ from ...widgets.controls import chip, clear_box, hbox, text_label, vbox
 from ...widgets.progress_ring import ThemedArea
 
 NODE_WIDTH = 28
-SPINE_TOKENS = {"work": "ring_start", "short": "text_muted", "long": "rest_text"}
+SPINE_TOKENS = {"work": "ring", "short": "text_muted", "long": "rest_text"}
 BREAK_TITLES = {"short": "Short break", "long": "Long rest"}
 
 
