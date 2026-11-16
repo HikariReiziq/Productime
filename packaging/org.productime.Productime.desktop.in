@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Productime
+GenericName=Focus Timer and Alarm
+Comment=Time-blocked Pomodoro targets, alarms with wake-up missions, stopwatch, timers, and a productivity report
+Exec=@EXEC@
+Icon=org.productime.Productime
+Terminal=false
+Categories=Utility;Clock;Education;
+Keywords=pomodoro;timer;alarm;stopwatch;focus;productivity;
+StartupNotify=true
+StartupWMClass=org.productime.Productime
