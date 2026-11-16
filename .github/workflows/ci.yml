@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    container: fedora:44
+    steps:
+      - name: Install system libraries and tools
+        run: >
+          dnf -y install
+          git tar gzip
+          python3 python3-gobject python3-cairo
+          gtk4 libadwaita adwaita-icon-theme
+          gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good
+          libnotify glib2
+          ruff desktop-file-utils
+          mutter dbus-daemon at-spi2-core procps-ng
+
+      - uses: actions/checkout@v4
+
+      - name: Create an unprivileged user
+        # The installer refuses to run as root, and the app is meant to run unprivileged.
+        run: |
+          useradd --create-home ci
+          chown -R ci:ci .
+
+      - name: Lint
+        run: su ci -c "ruff check src tests scripts"
+
+      - name: Em dash check
+        run: su ci -c "python3 scripts/check-emdash.py"
+
+      - name: Unit tests
+        run: su ci -c "python3 -m unittest discover -s tests/unit -v"
+
+      - name: Integration tests
+        run: su ci -c "python3 -m unittest discover -s tests/integration -v"
+
+      - name: Native GTK 4 UI tests (headless)
+        run: su ci -c 'export XDG_RUNTIME_DIR="$(mktemp -d)" && scripts/run-ui-tests.sh'
+
+      - name: Installer and desktop entry
+        run: |
+          su ci -c '
+            set -e
+            export HOME="$(mktemp -d)"
+            scripts/install-local.sh
+            desktop-file-validate "$HOME/.local/share/applications/org.productime.Productime.desktop"
+            scripts/install-local.sh --uninstall
+          '
+
+      - name: Build release tarball
+        run: su ci -c "scripts/build-fedora.sh"
