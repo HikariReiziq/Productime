@@ -1,0 +1,55 @@
+/* Light theme tokens. Only colors live here; every rule is in base.css. */
+
+@define-color bg_canvas #FFFFFF;
+@define-color bg_surface #FAFAFF;
+@define-color bg_surface_elevated #F3F3FC;
+@define-color bg_track #E9E9FF;
+@define-color border_subtle #E4E4F2;
+@define-color border_strong #85829B;
+@define-color text_primary #070417;
+@define-color text_secondary #4A475C;
+@define-color text_muted #5F5B73;
+@define-color accent_text #1D4ED8;
+
+@define-color accent_start #215BF0;
+@define-color accent_end #8B44E3;
+@define-color on_accent #FFFFFF;
+@define-color ring_start #215BF0;
+@define-color ring_end #8B44E3;
+@define-color focus_violet #9B51E0;
+
+@define-color success #07E092;
+@define-color on_success #070417;
+@define-color success_bg #E6FCF4;
+@define-color success_text #055C3B;
+@define-color rest #FFA656;
+@define-color rest_bg #FEF5ED;
+@define-color rest_text #8A4500;
+@define-color alert #FD5B71;
+@define-color alert_bg #FFEFF1;
+@define-color alert_text #A61B32;
+@define-color duration_badge #3D4ABA;
+@define-color on_duration_badge #FFFFFF;
+@define-color violet_bg #F3EAFD;
+@define-color violet_text #6B21C8;
+@define-color cobalt_bg #E8EFFE;
+@define-color cobalt_text #1D4ED8;
+
+/* libadwaita picks these up so stock widgets match the brand surfaces. */
+@define-color window_bg_color @bg_canvas;
+@define-color window_fg_color @text_primary;
+@define-color view_bg_color @bg_canvas;
+@define-color view_fg_color @text_primary;
+@define-color headerbar_bg_color @bg_canvas;
+@define-color headerbar_fg_color @text_primary;
+@define-color headerbar_backdrop_color @bg_canvas;
+@define-color card_bg_color @bg_surface;
+@define-color card_fg_color @text_primary;
+@define-color dialog_bg_color @bg_surface;
+@define-color dialog_fg_color @text_primary;
+@define-color popover_bg_color @bg_surface;
+@define-color popover_fg_color @text_primary;
+@define-color accent_bg_color @accent_start;
+@define-color accent_fg_color @on_accent;
+@define-color accent_color @accent_text;
+@define-color destructive_color @alert_text;

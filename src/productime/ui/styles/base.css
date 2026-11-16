@@ -1,0 +1,406 @@
+/* Productime rules. Colors come from light.css or dark.css through @named tokens. */
+
+:root {
+  --window-bg-color: @bg_canvas;
+  --window-fg-color: @text_primary;
+  --view-bg-color: @bg_canvas;
+  --view-fg-color: @text_primary;
+  --headerbar-bg-color: @bg_canvas;
+  --headerbar-fg-color: @text_primary;
+  --headerbar-backdrop-color: @bg_canvas;
+  --card-bg-color: @bg_surface;
+  --card-fg-color: @text_primary;
+  --dialog-bg-color: @bg_surface;
+  --dialog-fg-color: @text_primary;
+  --popover-bg-color: @bg_surface;
+  --popover-fg-color: @text_primary;
+  --accent-bg-color: @accent_start;
+  --accent-fg-color: @on_accent;
+  --accent-color: @accent_text;
+  --destructive-color: @alert_text;
+}
+
+window.productime {
+  background-color: @bg_canvas;
+  color: @text_primary;
+  font-family: "Rubik", "Adwaita Sans", "Cantarell", sans-serif;
+  font-size: 14px;
+}
+
+/* A solid ring, because libadwaita's default focus ring is half transparent. */
+*:focus-visible {
+  outline: 2px solid @accent_text;
+  outline-offset: 2px;
+}
+
+entry:focus-within,
+spinbutton:focus-within {
+  outline: 2px solid @accent_text;
+  outline-offset: 1px;
+}
+
+.numeric {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+}
+
+.page-title { font-size: 24px; font-weight: 500; }
+.section-title { font-size: 18px; font-weight: 500; }
+.card-title { font-size: 16px; font-weight: 500; }
+.body-strong { font-weight: 500; }
+.secondary { color: @text_secondary; }
+.muted { color: @text_muted; }
+.small { font-size: 12px; }
+.error-text { color: @alert_text; }
+
+/* Shell */
+
+.rail {
+  background-color: @bg_surface;
+  border-right: 1px solid @border_subtle;
+  padding: 16px 12px;
+}
+
+.brand-title { font-size: 18px; font-weight: 500; }
+.brand-mark { border-radius: 8px; }
+
+button.nav-item {
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: none;
+  box-shadow: none;
+  background-color: transparent;
+  background-image: none;
+  color: @text_secondary;
+  font-weight: 500;
+  transition: background-color 120ms ease-out;
+}
+
+button.nav-item:hover {
+  background-color: @bg_surface_elevated;
+  color: @text_primary;
+}
+
+/* The bar marks the current view; it only appears on the checked item. */
+button.nav-item:checked {
+  background-color: @bg_surface_elevated;
+  color: @text_primary;
+  box-shadow: inset 3px 0 0 0 @ring_start;
+}
+
+.bottom-bar {
+  background-color: @bg_surface;
+  border-top: 1px solid @border_subtle;
+  padding: 4px;
+}
+
+.bottom-bar button.nav-item {
+  min-height: 52px;
+  padding: 4px 2px;
+  font-size: 12px;
+}
+
+.bottom-bar button.nav-item:checked {
+  box-shadow: inset 0 3px 0 0 @ring_start;
+}
+
+.mini-session {
+  background-color: @bg_surface_elevated;
+  border: 1px solid @border_subtle;
+  border-radius: 12px;
+  padding: 10px 12px;
+}
+
+.alert-bar {
+  background-color: @alert_bg;
+  color: @alert_text;
+  border-bottom: 1px solid @alert_text;
+  padding: 8px 16px;
+}
+
+.settings-group {
+  border-top: 1px solid @border_subtle;
+  padding-top: 12px;
+}
+
+/* Surfaces */
+
+/* libadwaita also styles .card and gives it a shadow; these surfaces stay flat with a hairline. */
+.card {
+  background-color: @bg_surface;
+  border: 1px solid @border_subtle;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: none;
+}
+
+.row-card {
+  background-color: @bg_surface;
+  border: 1px solid @border_subtle;
+  border-radius: 12px;
+  padding: 12px 16px;
+  min-height: 52px;
+}
+
+.hero-time { font-size: 32px; font-weight: 500; }
+.clock-display { font-size: 56px; font-weight: 500; }
+.clock-display.compact { font-size: 38px; }
+.alarm-time { font-size: 32px; font-weight: 500; }
+
+.icon-well {
+  min-width: 44px;
+  min-height: 44px;
+  border-radius: 9999px;
+  background-color: @bg_track;
+  color: @text_secondary;
+  font-weight: 600;
+}
+
+.icon-well.work { background-color: @alert_bg; color: @alert_text; }
+.icon-well.study { background-color: @violet_bg; color: @violet_text; }
+.icon-well.coding { background-color: @cobalt_bg; color: @cobalt_text; }
+.icon-well.personal { background-color: @rest_bg; color: @rest_text; }
+
+.status-dot {
+  min-width: 10px;
+  min-height: 10px;
+  border-radius: 9999px;
+  background-color: @focus_violet;
+}
+
+/* Chips */
+
+.chip {
+  border-radius: 6px;
+  padding: 2px 8px;
+  font-size: 12px;
+  background-color: @bg_track;
+  color: @text_secondary;
+}
+
+.chip.work, .chip.alert { background-color: @alert_bg; color: @alert_text; }
+.chip.study { background-color: @violet_bg; color: @violet_text; }
+.chip.coding { background-color: @cobalt_bg; color: @cobalt_text; }
+.chip.personal, .chip.rest { background-color: @rest_bg; color: @rest_text; }
+.chip.success { background-color: @success_bg; color: @success_text; }
+
+.day-pill {
+  border-radius: 6px;
+  padding: 2px 6px;
+  font-size: 12px;
+  background-color: @bg_track;
+  color: @text_muted;
+}
+
+.day-pill.active { background-color: @cobalt_bg; color: @cobalt_text; font-weight: 500; }
+
+.total-badge {
+  background-color: @cobalt_bg;
+  color: @cobalt_text;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-weight: 500;
+}
+
+/* Buttons */
+
+button.primary,
+button.secondary,
+button.destructive-outline,
+button.ghost {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 16px;
+  border-radius: 10px;
+  font-weight: 500;
+  box-shadow: none;
+  transition: background-color 120ms ease-out;
+}
+
+button.primary {
+  background-image: linear-gradient(135deg, @accent_start, @accent_end);
+  color: @on_accent;
+  border: none;
+}
+
+button.primary:hover { box-shadow: inset 0 0 0 100px alpha(white, 0.10); }
+button.primary:active { box-shadow: inset 0 0 0 100px alpha(black, 0.12); }
+
+button.primary:disabled {
+  background-image: none;
+  background-color: @bg_track;
+  color: @text_muted;
+}
+
+button.secondary {
+  background-image: none;
+  background-color: @bg_surface_elevated;
+  color: @text_primary;
+  border: 1px solid @border_strong;
+}
+
+button.secondary:hover { background-color: @bg_track; }
+
+button.destructive-outline {
+  background-image: none;
+  background-color: transparent;
+  color: @alert_text;
+  border: 1px solid @alert_text;
+}
+
+button.destructive-outline:hover { background-color: @alert_bg; }
+
+button.ghost {
+  background-image: none;
+  background-color: transparent;
+  color: @text_secondary;
+  border: none;
+  padding: 0 10px;
+}
+
+button.ghost:hover { background-color: @bg_surface_elevated; color: @text_primary; }
+
+button.secondary:disabled,
+button.destructive-outline:disabled,
+button.ghost:disabled {
+  color: @text_muted;
+  border-color: @border_subtle;
+}
+
+button.round-well {
+  min-width: 60px;
+  min-height: 60px;
+  padding: 0;
+  border-radius: 9999px;
+}
+
+/* Option groups */
+
+.choice-group button {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 0 12px;
+  border-radius: 10px;
+  border: 1px solid @border_strong;
+  box-shadow: none;
+  background-image: none;
+  background-color: transparent;
+  color: @text_secondary;
+  font-weight: 400;
+}
+
+.choice-group button:hover { background-color: @bg_surface_elevated; }
+
+.choice-group button:checked {
+  background-color: @cobalt_bg;
+  color: @cobalt_text;
+  border-color: @accent_text;
+  font-weight: 500;
+}
+
+.segmented {
+  background-color: @bg_track;
+  border-radius: 10px;
+  padding: 3px;
+}
+
+.segmented button {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 8px;
+  border: none;
+  box-shadow: none;
+  background-image: none;
+  background-color: transparent;
+  color: @text_muted;
+  font-weight: 500;
+}
+
+.segmented button:checked {
+  background-color: @bg_surface;
+  color: @text_primary;
+}
+
+/* Form fields */
+
+.field-label { font-size: 13px; font-weight: 500; color: @text_secondary; }
+
+/* The default placeholder is 55% opaque, which falls under 4.5:1 on these surfaces. */
+text > placeholder {
+  opacity: 1;
+  color: @text_muted;
+}
+
+/* The brand cobalt is under 3:1 on the dark card surface, so filled controls use the ring color. */
+scale > trough > highlight,
+switch:checked {
+  background-color: @ring_start;
+}
+
+entry,
+spinbutton {
+  min-height: 44px;
+  border-radius: 10px;
+  border: 1px solid @border_strong;
+  background-color: @bg_canvas;
+  color: @text_primary;
+  box-shadow: none;
+}
+
+.form-section {
+  border-top: 1px solid @border_subtle;
+  padding-top: 14px;
+}
+
+/* Timeline */
+
+.timeline-row { padding: 4px 8px 4px 0; border-radius: 12px; }
+.timeline-row.active { background-color: @bg_surface_elevated; }
+.timeline-title { font-weight: 500; }
+.timeline-range { font-size: 12px; color: @text_secondary; }
+
+/* Report and tables */
+
+.kpi-card { min-height: 92px; }
+.kpi-value { font-size: 32px; font-weight: 500; }
+
+.kpi-badge {
+  min-width: 32px;
+  min-height: 32px;
+  border-radius: 8px;
+}
+
+.kpi-badge.success { background-color: @success; color: @on_success; }
+.kpi-badge.duration { background-color: @duration_badge; color: @on_duration_badge; }
+
+.table-header {
+  font-size: 12px;
+  font-weight: 500;
+  color: @text_muted;
+  padding: 8px 12px;
+  border-bottom: 1px solid @border_subtle;
+}
+
+.table-row {
+  padding: 10px 12px;
+  border-bottom: 1px solid @border_subtle;
+}
+
+.delta-faster { color: @success_text; }
+.delta-slower { color: @alert_text; }
+
+/* States and dialogs */
+
+.state-panel { padding: 36px 20px; }
+.state-title { font-size: 18px; font-weight: 500; }
+
+.mission-prompt {
+  background-color: @bg_track;
+  border-radius: 12px;
+  padding: 16px;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.ringing-time { font-size: 44px; font-weight: 600; letter-spacing: 1px; }

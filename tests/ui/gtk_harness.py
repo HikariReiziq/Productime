@@ -1,0 +1,229 @@
+"""Drive a real Productime GTK 4 application inside the test process."""
+
+import os
+import re
+import sys
+import tempfile
+import time
+import unittest
+from pathlib import Path
+
+import gi
+
+gi.require_version("Gtk", "4.0")
+gi.require_version("Adw", "1")
+
+from gi.repository import Gio, GLib, Gtk
+
+from productime.app import ProductimeApp
+from productime.services.clock import FakeClock
+from support import MONDAY_0800, RecordingNotifier, quiet_pygobject_asyncio_warning
+
+# Real decoding and looping, but samples go nowhere, so the suite is silent.
+SILENT_SINK = "fakesink sync=true"
+
+# GLib, GTK, libadwaita, Pango, and GStreamer log lines, plus tracebacks that PyGObject
+# prints (instead of raising) when a signal handler fails.
+NATIVE_PROBLEM = re.compile(
+    r"-(WARNING|CRITICAL|ERROR) \*\*|Traceback \(most recent call last\)|Theme pars(er|ing) error"
+    r"|: (Py)?(GI)?Warning: "
+)
+
+
+def pump(seconds: float = 0.05) -> None:
+    context = GLib.MainContext.default()
+    deadline = time.monotonic() + seconds
+    while True:
+        while context.iteration(False):
+            pass
+        if time.monotonic() >= deadline:
+            return
+        time.sleep(0.005)
+
+
+def pump_until(predicate, timeout: float = 5.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        pump(0.02)
+        if predicate():
+            return True
+    return bool(predicate())
+
+
+class NativeStderr:
+    """Capture file descriptor 2, which is where C libraries write, not sys.stderr."""
+
+    def __init__(self):
+        # Closed in stop(); it must outlive start(), so a with-block does not fit.
+        self._file = tempfile.TemporaryFile(mode="w+b")  # noqa: SIM115
+        self._saved = -1
+
+    def start(self) -> None:
+        sys.stderr.flush()
+        self._saved = os.dup(2)
+        os.dup2(self._file.fileno(), 2)
+
+    def stop(self) -> str:
+        sys.stderr.flush()
+        os.dup2(self._saved, 2)
+        os.close(self._saved)
+        self._file.seek(0)
+        text = self._file.read().decode("utf-8", "replace")
+        self._file.close()
+        return text
+
+
+class FakeFileChooser:
+    """Stands in for the native file dialogs: answers with a preset path and records requests."""
+
+    def __init__(self):
+        self.next_open: Path | None = None
+        self.next_save: Path | None = None
+        self.requests: list[tuple[str, str, str]] = []
+        self.opened_folders: list[Path] = []
+
+    def open_file(self, _parent, title, filter_name, _patterns, on_path) -> None:
+        self.requests.append(("open", title, filter_name))
+        if self.next_open is not None:
+            on_path(Path(self.next_open))
+
+    def save_file(self, _parent, title, suggested_name, on_path) -> None:
+        self.requests.append(("save", title, suggested_name))
+        if self.next_save is not None:
+            on_path(Path(self.next_save))
+
+    def open_folder(self, _parent, folder) -> None:
+        self.opened_folders.append(Path(folder))
+
+
+def text_of(widget) -> str:
+    """Caption of a button built with or without an icon."""
+    child = widget.get_child() if hasattr(widget, "get_child") else None
+    if child is not None and hasattr(child, "get_last_child") and child.get_last_child() is not None:
+        return child.get_last_child().get_text()
+    return widget.get_label() or ""
+
+
+class GtkAppTestCase(unittest.TestCase):
+    window_size: tuple[int, int] | None = None
+    _launches = 0
+
+    @classmethod
+    def setUpClass(cls):
+        quiet_pygobject_asyncio_warning()
+
+    def setUp(self):
+        self._native = NativeStderr()
+        self._native.start()
+        self.addCleanup(self._check_native_output)
+        self._tmp = tempfile.TemporaryDirectory(prefix="productime-ui-")
+        self.addCleanup(self._tmp.cleanup)
+        self.tmp = Path(self._tmp.name)
+        self.data_dir = self.tmp / "data" / "productime"
+        self.clock = FakeClock(MONDAY_0800)
+        self.notifier = RecordingNotifier()
+        self.chooser = FakeFileChooser()
+        self.app = None
+        self.addCleanup(self.close_app)
+        self.launch()
+
+    def launch(self, data_dir: Path | None = None):
+        # Each instance exports a D-Bus object named after its id, so ids must not repeat in one process.
+        GtkAppTestCase._launches += 1
+        self.app = ProductimeApp(
+            application_id=f"org.productime.Productime.Test{GtkAppTestCase._launches}",
+            flags=Gio.ApplicationFlags.NON_UNIQUE,
+            data_dir=data_dir or self.data_dir,
+            clock=self.clock,
+            audio_sink=SILENT_SINK,
+            notifier=self.notifier,
+            file_chooser=self.chooser,
+            window_size=self.window_size,
+        )
+        self.app.register(None)
+        self.app.activate()
+        pump(0.3)
+        self.window = self.app.window
+        self.scheduler = self.app.scheduler
+        self.repo = self.app.repo
+        return self.app
+
+    def close_app(self) -> None:
+        app, self.app = self.app, None
+        if app is None:
+            return
+        app.close_window()
+        pump(0.1)
+        app.close_services()
+        pump(0.05)
+
+    def _check_native_output(self) -> None:
+        output = self._native.stop()
+        if output.strip():
+            sys.stderr.write(output)
+        problems = [line for line in output.splitlines() if NATIVE_PROBLEM.search(line)]
+        self.assertEqual(problems, [], "GTK or Python reported problems on stderr during this test")
+
+    # Interaction helpers
+
+    def click(self, button) -> None:
+        """Press a button the way a user could: it must be on screen and enabled."""
+        self.assertTrue(button.get_mapped(), f"button {text_of(button)!r} is not on screen")
+        self.assertTrue(button.is_sensitive(), f"button {text_of(button)!r} is disabled")
+        button.emit("clicked")
+        pump(0.05)
+
+    def choose(self, group, value) -> None:
+        button = group.button_for(value)
+        self.assertTrue(button.get_mapped() and button.is_sensitive())
+        button.set_active(True)
+        pump(0.02)
+
+    def type_text(self, entry, text: str) -> None:
+        """Insert one character at a time, like a keyboard does."""
+        delegate = entry.get_delegate()
+        for character in text:
+            delegate.insert_text(character, len(entry.get_text()))
+        pump(0.02)
+
+    def press_escape(self, dialog) -> None:
+        """Run the action bound to the Escape key on a dialog, as the key press would."""
+        controllers = dialog.observe_controllers()
+        for index in range(controllers.get_n_items()):
+            controller = controllers.get_item(index)
+            if not isinstance(controller, Gtk.ShortcutController):
+                continue
+            for position in range(controller.get_n_items()):
+                shortcut = controller.get_item(position)
+                if shortcut.get_trigger().to_string() == "Escape":
+                    shortcut.get_action().activate(Gtk.ShortcutActionFlags.EXCLUSIVE, dialog, None)
+                    pump(0.3)
+                    return
+        self.fail("dialog has no Escape shortcut")
+
+    def respond(self, dialog, response: str) -> None:
+        """Answer an Adw.AlertDialog."""
+        dialog.emit("response", response)
+        dialog.force_close()
+        pump(0.1)
+
+    def advance(self, seconds: float) -> None:
+        """Move the injected clock, then let the scheduler and the window catch up."""
+        self.clock.advance(seconds)
+        self.scheduler.poll()
+        self.window.refresh_live()
+        pump(0.1)
+
+    def go(self, name: str):
+        self.window.nav_button(name, bottom=self.window.compact).set_active(True)
+        pump(0.15)
+        return self.window.view(name)
+
+    def audio_playing(self) -> bool:
+        return pump_until(lambda: self.app.audio.alert_state() == "playing", 5)
+
+
+def target_size(widget) -> tuple[float, float]:
+    """Border-box size of a widget: the area that actually receives clicks."""
+    ok, bounds = widget.compute_bounds(widget.get_parent())
+    return (bounds.get_width(), bounds.get_height()) if ok else (0.0, 0.0)
