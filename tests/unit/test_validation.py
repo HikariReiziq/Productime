@@ -218,6 +218,14 @@ class AlarmAndTimerValidationTests(unittest.TestCase):
             with self.subTest(overrides=overrides), self.assertRaises(v.ValidationError):
                 v.validate_alarm_draft(alarm_draft(**overrides))
 
+    def test_click_mission_needs_10_to_200_clicks(self):
+        for clicks in (10, 20, 30, 50, 200):
+            cleaned = v.validate_alarm_draft(alarm_draft(mission_mode="click", mission_clicks=clicks))
+            self.assertEqual((cleaned.mission_mode, cleaned.mission_clicks), ("click", clicks))
+        for clicks in (9, 201, 0, True, "30", 30.5):
+            with self.subTest(clicks=clicks), self.assertRaises(v.ValidationError):
+                v.validate_alarm_draft(alarm_draft(mission_mode="click", mission_clicks=clicks))
+
     def test_timer_needs_a_name_and_a_positive_duration(self):
         cleaned = v.validate_timer_draft(TimerDraft(" Tea ", 180, "bundled-funny"))
         self.assertEqual((cleaned.name, cleaned.duration_seconds), ("Tea", 180))
@@ -280,6 +288,19 @@ class BackupValidationTests(unittest.TestCase):
             with self.subTest(mutation=index), self.assertRaises(v.ValidationError):
                 v.validate_backup(payload)
 
+    def test_click_counts_round_trip_and_older_backups_default_to_30(self):
+        payload = backup_payload()
+        payload["alarms"][0].update(mission_mode="click", mission_clicks=50)
+        self.assertEqual(v.validate_backup(payload)["alarms"][0]["mission_clicks"], 50)
+
+        older = backup_payload()
+        older["alarms"][0].pop("mission_clicks", None)
+        self.assertEqual(v.validate_backup(older)["alarms"][0]["mission_clicks"], 30)
+
+        payload["alarms"][0]["mission_clicks"] = 500
+        with self.assertRaises(v.ValidationError):
+            v.validate_backup(payload)
+
     def test_unknown_preference_keys_are_dropped(self):
         payload = backup_payload()
         payload["preferences"]["shell_command"] = "rm -rf ~"
@@ -289,7 +310,12 @@ class BackupValidationTests(unittest.TestCase):
     def test_settings_preferences_round_trip_through_a_backup(self):
         payload = backup_payload()
         payload["preferences"].update(
-            theme="system", notify_alarms="0", notify_timers="1", notify_targets="0", onboarding_done="1"
+            theme="system",
+            notify_alarms="0",
+            notify_timers="1",
+            notify_targets="0",
+            onboarding_done="1",
+            timeline_clock="1",
         )
 
         kept = v.validate_backup(payload)["preferences"]
@@ -298,7 +324,13 @@ class BackupValidationTests(unittest.TestCase):
         self.assertEqual(
             (kept["notify_alarms"], kept["notify_targets"], kept["onboarding_done"]), ("0", "0", "1")
         )
-        for bad in ({"notify_alarms": "yes"}, {"onboarding_done": "2"}, {"theme": "blue"}):
+        self.assertEqual(kept["timeline_clock"], "1")
+        for bad in (
+            {"notify_alarms": "yes"},
+            {"onboarding_done": "2"},
+            {"theme": "blue"},
+            {"timeline_clock": "on"},
+        ):
             payload = backup_payload()
             payload["preferences"].update(bad)
             with self.subTest(bad=bad), self.assertRaises(v.ValidationError):

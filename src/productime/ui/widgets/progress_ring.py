@@ -33,10 +33,17 @@ class ThemedArea(Gtk.DrawingArea):
 
 
 class ProgressRing(ThemedArea):
-    def __init__(self, theme, size: int = 240, stroke: float = 12, text_px: float = 44):
+    """Open-arc countdown. With ``scale`` set, digits and stroke follow the ring's drawn size,
+    so a ring that CSS makes larger in a big window also gets larger numbers."""
+
+    def __init__(
+        self, theme, size: int = 240, stroke: float = 12, text_px: float = 44, scale: bool = False
+    ):
         super().__init__(theme, accessible_role=Gtk.AccessibleRole.IMG)
         self._stroke = stroke
         self._text_px = text_px
+        self._size = size
+        self._scale = scale
         self._fraction = 1.0
         self._text = ""
         self._caption = ""
@@ -58,6 +65,13 @@ class ProgressRing(ThemedArea):
     def tone(self) -> str:
         return self._tone
 
+    def _factor(self, width: float, height: float) -> float:
+        return max(1.0, min(width, height) / self._size) if self._scale else 1.0
+
+    @property
+    def text_px(self) -> float:
+        return self._text_px * self._factor(self.get_width(), self.get_height())
+
     def set_progress(self, fraction: float, text: str, caption: str = "", tone: str = "focus") -> None:
         state = (max(0.0, min(1.0, fraction)), text, caption, tone)
         if state == (self._fraction, self._text, self._caption, self._tone):
@@ -69,9 +83,11 @@ class ProgressRing(ThemedArea):
 
     def _draw(self, _area, cr, width, height) -> None:
         theme = self.theme
+        factor = self._factor(width, height)
+        stroke, text_px = self._stroke * factor, self._text_px * factor
         center_x, center_y = width / 2, height / 2
-        radius = (min(width, height) - self._stroke) / 2 - 1
-        cr.set_line_width(self._stroke)
+        radius = (min(width, height) - stroke) / 2 - 1
+        cr.set_line_width(stroke)
         cr.set_line_cap(cairo.LINE_CAP_ROUND)
 
         cr.set_source_rgb(*theme.rgb("bg_track"))
@@ -83,15 +99,15 @@ class ProgressRing(ThemedArea):
             cr.arc(center_x, center_y, radius, ARC_START, ARC_START + ARC_SWEEP * self._fraction)
             cr.stroke()
 
-        layout = self.numeric_layout(self._text, self._text_px, Pango.Weight.LIGHT)
+        layout = self.numeric_layout(self._text, text_px, Pango.Weight.LIGHT)
         text_width, text_height = layout.get_pixel_size()
-        offset = self._text_px * 0.28 if self._caption else 0
+        offset = text_px * 0.28 if self._caption else 0
         cr.set_source_rgb(*theme.rgb("text_primary"))
         cr.move_to(center_x - text_width / 2, center_y - text_height / 2 - offset)
         PangoCairo.show_layout(cr, layout)
 
         if self._caption:
-            caption = self.numeric_layout(self._caption, max(11, self._text_px * 0.32), Pango.Weight.NORMAL)
+            caption = self.numeric_layout(self._caption, max(11, text_px * 0.32), Pango.Weight.NORMAL)
             caption_width, _caption_height = caption.get_pixel_size()
             cr.set_source_rgb(*theme.rgb("text_secondary"))
             cr.move_to(center_x - caption_width / 2, center_y + text_height / 2 - offset + 2)

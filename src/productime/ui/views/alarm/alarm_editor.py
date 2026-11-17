@@ -5,7 +5,16 @@ from gi.repository import Gtk
 from ....domain.alarm_schedule import EVERY_DAY, WEEKDAY_SHORT, describe_repeat, to_12h, to_24h
 from ....domain.formatters import format_minutes, format_snooze_limit
 from ....domain.mission_engine import SESSION_POOL_SIZE, TYPING_PHRASES
-from ....domain.models import ALARM_SNOOZE_INTERVALS, SNOOZE_LIMIT_CHOICES, Alarm, AlarmDraft
+from ....domain.models import (
+    ALARM_SNOOZE_INTERVALS,
+    CLICK_PRESETS,
+    DEFAULT_CLICKS,
+    MAX_CLICKS,
+    MIN_CLICKS,
+    SNOOZE_LIMIT_CHOICES,
+    Alarm,
+    AlarmDraft,
+)
 from ....domain.validation import MAX_NAME_LENGTH, ValidationError
 from ...widgets.controls import (
     ChoiceGroup,
@@ -32,7 +41,12 @@ MISSION_TIPS = {
         f"from a bank of {len(TYPING_PHRASES)}, and pasting is blocked."
     ),
     "math": "Solve 1 to 3 math problems to stop the alarm. It keeps ringing until every answer is right.",
+    "click": (
+        f"Click one big button {MIN_CLICKS} to {MAX_CLICKS} times to stop the alarm. "
+        "Space or Enter count once per press."
+    ),
 }
+CUSTOM = "custom"
 # Real problems from each level's ranges in the mission engine, shown as a taste of the difficulty.
 DIFFICULTY_SAMPLES = {"easy": "24 + 17", "medium": "13 \u00d7 7", "hard": "18 \u00d7 12 + 90"}
 LEVELS = {"easy": 1, "medium": 2, "hard": 3}
@@ -71,7 +85,9 @@ def difficulty_tile(level: str, caption: Gtk.Label) -> Gtk.Box:
     return vbox(6, level_meter(LEVELS[level]), caption, sample)
 
 
-def mission_summary(mode: str, count: int, difficulty: str) -> str:
+def mission_summary(mode: str, count: int, difficulty: str, clicks: int = DEFAULT_CLICKS) -> str:
+    if mode == "click":
+        return f"Click mission: press the button {clicks} times. Click to change."
     if mode == "typing":
         noun = "phrase" if count == 1 else "phrases"
         return f"Typing mission: type {count} {noun} exactly. Click to change."
@@ -95,12 +111,13 @@ class MissionSlot(Gtk.Button):
         self.set_child(content)
         self.connect("clicked", lambda _b: on_click())
 
-    def show(self, mode: str, count: int, difficulty: str) -> None:
+    def show(self, mode: str, count: int, difficulty: str, clicks: int = DEFAULT_CLICKS) -> None:
         chosen = mode != "off"
         self.icon.set_from_icon_name(f"productime-{mode}-symbolic" if chosen else "list-add-symbolic")
-        self.caption.set_text(f"{count}x" if chosen else "")
+        caption = str(clicks) if mode == "click" else f"{count}x"
+        self.caption.set_text(caption if chosen else "")
         self.caption.set_visible(chosen)
-        summary = mission_summary(mode, count, difficulty)
+        summary = mission_summary(mode, count, difficulty, clicks)
         self.set_tooltip_text(summary)
         set_accessible_label(self, summary)
         if chosen:
@@ -120,6 +137,7 @@ class AlarmEditor(EditorPage):
         self.interval = alarm.snooze_interval_minutes if alarm else 5
         self.limit = alarm.snooze_limit if alarm else 3
         self.mission = ("off", 1, "easy")
+        self.clicks = alarm.mission_clicks if alarm else DEFAULT_CLICKS
         if alarm:
             self.mission = (alarm.mission_mode, alarm.mission_count, alarm.mission_difficulty)
 
@@ -202,7 +220,7 @@ class AlarmEditor(EditorPage):
 
     def _show_choices(self) -> None:
         self.snooze_row.set_value(f"{self.interval} min, {format_snooze_limit(self.limit).lower()}")
-        self.mission_slot.show(*self.mission)
+        self.mission_slot.show(*self.mission, self.clicks)
 
     def open_snooze_sheet(self) -> None:
         sheet = OptionSheet("Snooze", on_save=lambda: self._apply_snooze(sheet))
@@ -236,14 +254,27 @@ class AlarmEditor(EditorPage):
                 icons.append(image)
             return vbox(4, caption, icons)
 
+        sheet.clicks_spin = spin(MIN_CLICKS, MAX_CLICKS, self.clicks)
+        sheet.clicks_spin.set_tooltip_text("Custom number of clicks")
+        clicks_custom = hbox(12, sheet.clicks_spin, text_label("clicks", "secondary"))
+        clicks_custom.set_halign(Gtk.Align.CENTER)
+
+        def clicks_value(value: object) -> int:
+            return spin_value(sheet.clicks_spin) if value == CUSTOM else value
+
+        def arrange(chosen: str, custom_clicks: bool) -> None:
+            sheet.sections["count"].set_visible(chosen in ("typing", "math"))
+            sheet.sections["difficulty"].set_visible(chosen == "math")
+            sheet.sections["clicks"].set_visible(chosen == "click")
+            clicks_custom.set_visible(custom_clicks)
+
         def update(_value=None) -> None:
             chosen = sheet.groups["mission"].get_value()
-            sheet.sections["count"].set_visible(chosen != "off")
-            sheet.sections["difficulty"].set_visible(chosen == "math")
+            arrange(chosen, sheet.groups["clicks"].get_value() == CUSTOM)
             icon = "productime-math-symbolic" if chosen == "math" else "productime-typing-symbolic"
             for image in count_icons:
                 image.set_from_icon_name(icon)
-            sheet.refresh("count")
+            sheet.refresh()
 
         icons = {"off": "productime-mission-off-symbolic"}
         sheet.add_section(
@@ -251,7 +282,7 @@ class AlarmEditor(EditorPage):
             "Mission",
             [
                 (key, title, icons.get(key, f"productime-{key}-symbolic"), MISSION_TIPS[key])
-                for key, title in (("off", "Off"), ("typing", "Typing"), ("math", "Math"))
+                for key, title in (("off", "Off"), ("typing", "Typing"), ("math", "Math"), ("click", "Click"))
             ],
             mode,
             on_change=update,
@@ -271,12 +302,25 @@ class AlarmEditor(EditorPage):
             difficulty,
             tile=difficulty_tile,
         )
-        sheet.reserve_height()
+        sheet.add_section(
+            "clicks",
+            "How many clicks",
+            [*((n, str(n)) for n in CLICK_PRESETS), (CUSTOM, "Custom")],
+            self.clicks if self.clicks in CLICK_PRESETS else CUSTOM,
+            chips=True,
+            describe=lambda value: f"{clicks_value(value)} clicks",
+            on_change=update,
+            extra=clicks_custom,
+        )
+        sheet.clicks_spin.connect("value-changed", lambda _s: sheet.refresh("clicks"))
+        sheet.reserve_height([lambda m=mode: arrange(m, m == "click") for mode in ("off", "math", "click")])
         update()
         self._present(sheet)
 
     def _apply_mission(self, sheet: OptionSheet) -> None:
         self.mission = tuple(sheet.groups[key].get_value() for key in ("mission", "count", "difficulty"))
+        choice = sheet.groups["clicks"].get_value()
+        self.clicks = spin_value(sheet.clicks_spin) if choice == CUSTOM else choice
         self._show_choices()
 
     def _present(self, sheet: OptionSheet) -> None:
@@ -296,6 +340,7 @@ class AlarmEditor(EditorPage):
             mission_mode=mode,
             mission_count=count,
             mission_difficulty=difficulty,
+            mission_clicks=self.clicks,
             enabled=self._alarm.enabled if self._alarm else True,
         )
         repo = self.window.app.repo

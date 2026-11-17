@@ -1,6 +1,7 @@
 """Focus Studio: countdown ring with controls beside the live batch timeline."""
 
 from collections.abc import Callable
+from datetime import datetime, timedelta
 
 from gi.repository import Gtk
 
@@ -15,6 +16,7 @@ from ...widgets.controls import (
     icon_button,
     make_button,
     set_accessible_label,
+    set_button_text,
     tag_style,
     text_label,
     vbox,
@@ -31,6 +33,7 @@ PHASE_TEXT = {
     TargetPhase.SNOOZING: "Snoozed",
     TargetPhase.RESTING: "Break",
     TargetPhase.PAUSED_REST: "Break paused",
+    TargetPhase.READY_FOR_NEXT: "Break over",
     TargetPhase.COMPLETED: "Completed",
 }
 RING_TONE = {
@@ -39,6 +42,7 @@ RING_TONE = {
     TargetPhase.RESTING: "rest",
     TargetPhase.PAUSED_REST: "rest",
     TargetPhase.AWAITING_SUBTASK_GATE: "alert",
+    TargetPhase.READY_FOR_NEXT: "alert",
     TargetPhase.PAUSED_WORK: "idle",
 }
 _CHECKABLE = (
@@ -50,6 +54,8 @@ _CHECKABLE = (
 _PAUSABLE = (TargetPhase.WORKING, TargetPhase.SNOOZING, TargetPhase.RESTING)
 _PAUSED = (TargetPhase.PAUSED_WORK, TargetPhase.PAUSED_REST)
 _RESTING = (TargetPhase.RESTING, TargetPhase.PAUSED_REST)
+COMPLETE_TIP = "Complete subtask"
+NEXT_TIP = "Start the next batch"
 
 
 class FocusTargetView(Gtk.Box):
@@ -70,12 +76,14 @@ class FocusTargetView(Gtk.Box):
         dot.set_valign(Gtk.Align.CENTER)
         self.subtask_label = text_label("", "body-strong", wrap=True)
         self.subtask_label.set_hexpand(True)
-        self.ring = ProgressRing(window.app.theme, size=240, stroke=12, text_px=44)
+        # CSS sets the ring's size per window size; digits and stroke scale with it.
+        self.ring = ProgressRing(window.app.theme, size=320, stroke=14, text_px=64, scale=True)
+        self.ring.add_css_class("focus-ring")
         self.hint_label = text_label("", "secondary", xalign=0.5, wrap=True)
         self.hint_label.set_justify(Gtk.Justification.CENTER)
 
         self.complete_button = icon_button(
-            "object-select-symbolic", "Complete subtask", "primary", "round-well", on_click=self.complete
+            "object-select-symbolic", COMPLETE_TIP, "primary", "round-well", on_click=self.complete
         )
         self.pause_button = icon_button(
             "media-playback-pause-symbolic", "Pause", "secondary", "round-well", on_click=self.toggle_pause
@@ -93,6 +101,10 @@ class FocusTargetView(Gtk.Box):
         self.finish_button.set_halign(Gtk.Align.CENTER)
         self.gate_button = make_button("Open Check-off", "primary", on_click=window.reopen_alert)
         self.gate_button.set_halign(Gtk.Align.CENTER)
+        self.ready_button = make_button(
+            "Start", "primary", on_click=self.start_next, icon="media-playback-start-symbolic"
+        )
+        self.ready_button.set_halign(Gtk.Align.CENTER)
 
         self.left = vbox(
             14,
@@ -104,10 +116,11 @@ class FocusTargetView(Gtk.Box):
             controls,
             self.finish_button,
             self.gate_button,
+            self.ready_button,
         )
         self.left.set_hexpand(True)
 
-        self.timeline = VerticalTimeline(window.app.theme)
+        self.timeline = VerticalTimeline(window.app, origin=self._clock_origin)
         self.right = vbox(12, text_label("Batch timeline", "section-title"), self.timeline)
         self.right.add_css_class("card")
         self.right.set_hexpand(True)
@@ -143,7 +156,12 @@ class FocusTargetView(Gtk.Box):
         self.chips.append(chip(phase_text, phase_kind))
         self.subtask_label.set_text(session.batch.subtask_title)
 
-        self.complete_button.set_sensitive(state.phase in _CHECKABLE)
+        # During a break (but not the final one) the check button starts the next batch early.
+        moves_on = not state.is_final_batch and state.phase in (*_RESTING, TargetPhase.READY_FOR_NEXT)
+        self.complete_button.set_sensitive(state.phase in _CHECKABLE or moves_on)
+        tip = NEXT_TIP if moves_on else COMPLETE_TIP
+        self.complete_button.set_tooltip_text(tip)
+        set_accessible_label(self.complete_button, tip)
         self.pause_button.set_sensitive(state.phase in _PAUSABLE or state.phase in _PAUSED)
         paused = state.phase in _PAUSED
         self.pause_button.set_icon_name(
@@ -154,7 +172,12 @@ class FocusTargetView(Gtk.Box):
         self.finish_button.set_visible(state.in_final_rest)
         at_gate = state.phase is TargetPhase.AWAITING_SUBTASK_GATE
         self.gate_button.set_visible(at_gate)
-        if at_gate:
+        ready = state.phase is TargetPhase.READY_FOR_NEXT
+        self.ready_button.set_visible(ready)
+        if ready:
+            set_button_text(self.ready_button, f"Start Batch {state.batch_index + 1}")
+            self.hint_label.set_text("Break is over. Start the next batch when you are back.")
+        elif at_gate:
             self.hint_label.set_text("The batch timer ended. Check off the subtask to start your break.")
         elif state.phase is TargetPhase.SNOOZING:
             self.hint_label.set_text(
@@ -188,6 +211,22 @@ class FocusTargetView(Gtk.Box):
             self.phase_text or PHASE_TEXT[state.phase],
             RING_TONE.get(state.phase, "focus"),
         )
+        self.timeline.refresh_clock()
+
+    def _clock_origin(self) -> datetime:
+        """When minute zero of the plan falls, judged from where the session stands right now.
+
+        The current block ends after its remaining time, so pauses and snoozes push the rest of
+        the plan later, and the block after a finished break starts now.
+        """
+        now = self.window.app.clock.now()
+        session = self.scheduler.session
+        if session is None:
+            return now
+        state = session.state
+        slot = slots_from_batches(session.target.batches)[state.batch_index - 1]
+        anchor = slot.cumulative_end_minute if state.phase in _CHECKABLE else slot.break_end_minute
+        return now + timedelta(milliseconds=state.remaining_ms) - timedelta(minutes=anchor)
 
     def _run(self, action: Callable[[], None]) -> None:
         try:
@@ -196,7 +235,26 @@ class FocusTargetView(Gtk.Box):
             self.window.toast(str(error))
 
     def complete(self) -> None:
-        self._run(self.scheduler.complete_subtask)
+        session = self.scheduler.session
+        if session is None:
+            return
+        state = session.state
+        if state.phase is TargetPhase.READY_FOR_NEXT:
+            self.start_next()
+        elif state.phase in _RESTING:
+            upcoming = state.batch_index + 1
+            self.window.confirm(
+                f"Start Batch {upcoming} now?",
+                "Your break ends early and the next batch starts counting.",
+                f"Start Batch {upcoming}",
+                self.start_next,
+                destructive=False,
+            )
+        else:
+            self._run(self.scheduler.complete_subtask)
+
+    def start_next(self) -> None:
+        self._run(self.scheduler.start_next_batch)
 
     def toggle_pause(self) -> None:
         session = self.scheduler.session

@@ -4,6 +4,7 @@ Countdowns are anchored to the monotonic clock. The wall clock is consulted only
 schedule alarms and to detect time the monotonic clock skipped during a system suspend.
 """
 
+import json
 import random
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -26,8 +27,20 @@ PERSIST_INTERVAL_MS = 30_000
 MAX_WAKEUP_MS = 30_000
 
 _COUNTING = (TargetPhase.WORKING, TargetPhase.SNOOZING, TargetPhase.RESTING)
-_ACTIVE = (*_COUNTING, TargetPhase.AWAITING_SUBTASK_GATE)
+_ACTIVE = (*_COUNTING, TargetPhase.AWAITING_SUBTASK_GATE, TargetPhase.READY_FOR_NEXT)
 _PAUSED = (TargetPhase.PAUSED_WORK, TargetPhase.PAUSED_REST)
+SESSION_KEY = "target_session"
+TIMERS_KEY = "timers"
+_SNAPSHOT_FIELDS = (
+    "batch_index",
+    "remaining_ms",
+    "phase_total_ms",
+    "worked_ms",
+    "snoozed_ms",
+    "snooze_count",
+)
+# A saved moment longer than a day is corrupt, not a real countdown.
+_MAX_SNAPSHOT_MS = 24 * 60 * 60 * 1000
 
 
 class SchedulerError(Exception):
@@ -44,6 +57,11 @@ class TargetSession:
     @property
     def batch(self) -> TargetBatch:
         return self.target.batches[self.state.batch_index - 1]
+
+    @property
+    def next_batch(self) -> TargetBatch | None:
+        index = self.state.batch_index
+        return self.target.batches[index] if index < len(self.target.batches) else None
 
 
 @dataclass
@@ -68,13 +86,17 @@ class RingingAlarm:
     prompts: list[str] = field(default_factory=list)
     problems: list[MathProblem] = field(default_factory=list)
     mission_index: int = 0
+    clicks_needed: int = 0
+    clicks_done: int = 0
 
     @property
     def mission_total(self) -> int:
-        return len(self.prompts) or len(self.problems)
+        return len(self.prompts) or len(self.problems) or self.clicks_needed
 
     @property
     def mission_pending(self) -> bool:
+        if self.clicks_needed:
+            return self.clicks_done < self.clicks_needed
         return self.mission_index < self.mission_total
 
     @property
@@ -138,10 +160,12 @@ class Scheduler:
         self._fired: set[str] = set()
         self._sequence = 0
         self._since_persist_ms = 0
+        self._since_snapshot_ms = 0
         self._mono_ns = clock.monotonic_ns()
         self._wall_ns = clock.time_ns()
         self._wall = clock.now()
         self._restore_session()
+        self._restore_timers()
 
     def subscribe(self, listener: Callable[[], None]) -> None:
         self._listeners.append(listener)
@@ -155,6 +179,7 @@ class Scheduler:
             listener()
 
     def _after_change(self) -> None:
+        self._save_snapshot()
         self._sync_alert()
         self._emit()
         self._rearm()
@@ -192,6 +217,9 @@ class Scheduler:
             changed |= self._advance_snoozed(elapsed_ms)
         if wall > previous_wall:
             changed |= self._check_alarms(previous_wall, wall)
+        self._since_snapshot_ms += elapsed_ms
+        if changed or self._since_snapshot_ms >= PERSIST_INTERVAL_MS:
+            self._save_snapshot()
         if changed:
             self._sync_alert()
             self._emit()
@@ -248,6 +276,15 @@ class Scheduler:
                 session.batch.subtask_title,
                 session.target.id,
             )
+        if session and session.state.phase is TargetPhase.READY_FOR_NEXT:
+            state = session.state
+            return Alert(
+                "ready",
+                f"ready:{session.target.id}:{state.batch_index}:{state.rest_extensions}",
+                session.target.sound_id,
+                session.next_batch.subtask_title,
+                session.target.id,
+            )
         expired = sorted((r for r in self.timers.values() if r.status == "expired"), key=lambda r: r.sequence)
         if expired:
             run = expired[0]
@@ -284,15 +321,104 @@ class Scheduler:
         return TargetSession(target, state, self.clock.now(), state.worked_ms + state.snoozed_ms)
 
     def _restore_session(self) -> None:
-        """Bring back an unfinished target paused, so launching the app never starts a countdown."""
+        """Bring back an unfinished target paused, so launching the app never starts a countdown.
+
+        The moment saved when the app closed keeps the exact time left in work, snooze, or rest.
+        Without it, saved batch progress still restores the work done.
+        """
         for target in self.repo.list_targets():
             if target.status != "in_progress" or not target.batches:
                 continue
-            session = self._build_session(target)
-            if session.state.phase is TargetPhase.WORKING:
-                session.state = target_engine.pause(session.state)
-                self.session = session
+            state = self._saved_state(target)
+            if state is None:
+                state = self._build_session(target).state
+            state = target_engine.suspend(state)
+            self.session = TargetSession(target, state, self.clock.now(), state.worked_ms + state.snoozed_ms)
             return
+
+    def _saved_state(self, target: Target) -> SessionState | None:
+        """The saved moment for this target, or None when it is missing, stale, or malformed."""
+        raw = self.repo.get_runtime(SESSION_KEY)
+        if raw is None:
+            return None
+        try:
+            data = json.loads(raw)
+            if data.get("target_id") != target.id:
+                return None
+            values = [data[name] for name in _SNAPSHOT_FIELDS] + [data.get("rest_extensions", 0)]
+            if not all(type(value) is int and 0 <= value <= _MAX_SNAPSHOT_MS for value in values):
+                return None
+            phase = TargetPhase(data["phase"])
+            resume = TargetPhase(data["resume_phase"]) if data.get("resume_phase") else None
+        except ValueError, KeyError, TypeError, AttributeError:
+            return None
+        batch_index = values[0]
+        if phase in (TargetPhase.IDLE, TargetPhase.COMPLETED) or not 1 <= batch_index <= len(target.batches):
+            return None
+        plans = self._build_session(target).state.plans
+        return SessionState(
+            phase,
+            batch_index,
+            plans,
+            target.snooze_limit,
+            values[5],
+            values[1],
+            values[2],
+            values[3],
+            values[4],
+            resume,
+            values[6],
+        )
+
+    def _save_snapshot(self) -> None:
+        """Record where the running target and timers stand, so closing the app loses no time."""
+        self._since_snapshot_ms = 0
+        session = self.session
+        if session is None:
+            self.repo.set_runtime(SESSION_KEY, None)
+        else:
+            state = session.state
+            snapshot = {name: getattr(state, name) for name in _SNAPSHOT_FIELDS}
+            snapshot.update(
+                target_id=session.target.id,
+                phase=state.phase.value,
+                resume_phase=state.resume_phase.value if state.resume_phase else None,
+                rest_extensions=state.rest_extensions,
+            )
+            self.repo.set_runtime(SESSION_KEY, json.dumps(snapshot))
+        runs = [
+            {"timer_id": run.timer_id, "remaining_ms": run.remaining_ms, "status": run.status}
+            for run in self.timers.values()
+            if run.status in ("running", "paused")
+        ]
+        self.repo.set_runtime(TIMERS_KEY, json.dumps(runs) if runs else None)
+
+    def _restore_timers(self) -> None:
+        """Timers that were counting reopen paused at the time they had left."""
+        raw = self.repo.get_runtime(TIMERS_KEY)
+        if raw is None:
+            return
+        try:
+            runs = json.loads(raw)
+            for run in runs:
+                preset = self.repo.get_timer(run["timer_id"])
+                remaining = run["remaining_ms"]
+                if preset is None or type(remaining) is not int:
+                    continue
+                duration_ms = preset.duration_seconds * 1000
+                if not 0 < remaining <= duration_ms:
+                    continue
+                self.timers[preset.id] = TimerRun(
+                    preset.id,
+                    preset.name,
+                    preset.sound_id,
+                    duration_ms,
+                    remaining,
+                    "paused",
+                    self.clock.now(),
+                )
+        except ValueError, KeyError, TypeError:
+            self.timers.clear()
 
     def start_target(self, target_id: str) -> None:
         self.poll()
@@ -370,6 +496,8 @@ class Scheduler:
         if after.phase is TargetPhase.AWAITING_SUBTASK_GATE:
             self._persist_progress()
             self._notify_gate()
+        elif after.phase is TargetPhase.READY_FOR_NEXT:
+            self._notify_ready()
         elif after.phase is TargetPhase.COMPLETED:
             self._complete_target()
         elif after.batch_index != before.batch_index:
@@ -398,6 +526,23 @@ class Scheduler:
             self._complete_target()
         elif after.batch_index != batch.batch_index:
             self._begin_segment()
+        self._after_change()
+
+    def start_next_batch(self) -> None:
+        """Start the next batch once the user is back: after a break ran out, or to end it early."""
+        self.poll()
+        session = self._require_session()
+        session.state = target_engine.start_next_batch(session.state)
+        self.notifier.withdraw("target-ready")
+        self._begin_segment()
+        self._after_change()
+
+    def extend_rest(self, minutes: int) -> None:
+        self.poll()
+        session = self._require_session()
+        minutes = validation.validate_snooze_minutes(minutes)
+        session.state = target_engine.extend_rest(session.state, minutes)
+        self.notifier.withdraw("target-ready")
         self._after_change()
 
     def snooze_session(self, minutes: int) -> None:
@@ -435,6 +580,7 @@ class Scheduler:
         self._persist_progress()
         self._log_segment(completed=False)
         self.notifier.withdraw("target-gate")
+        self.notifier.withdraw("target-ready")
         self.session = None
         self._after_change()
 
@@ -590,6 +736,8 @@ class Scheduler:
             entry.problems = mission_engine.generate_math_set(
                 alarm.mission_difficulty, alarm.mission_count, self._rng
             )
+        elif alarm.mission_mode == "click":
+            entry.clicks_needed = alarm.mission_clicks
         self.ringing.append(entry)
         if not alarm.repeat_days and alarm.enabled:
             self.repo.set_alarm_enabled(alarm.id, False)
@@ -622,6 +770,20 @@ class Scheduler:
             "target-gate",
             f"Batch {session.state.batch_index} time is up",
             f'Check off "{session.batch.subtask_title}" to start your break.',
+            urgent=True,
+            buttons=tuple(buttons),
+        )
+
+    def _notify_ready(self) -> None:
+        session = self.session
+        state, upcoming = session.state, session.next_batch
+        buttons = [(f"Start Batch {state.batch_index + 1}", "app.ready-start", None)]
+        if state.can_extend_rest:
+            buttons.append(("Rest 5 min", "app.ready-extend", 5))
+        self.notifier.notify(
+            "target-ready",
+            "Break is over",
+            f'Next up: "{upcoming.subtask_title}". Start when you are back.',
             urgent=True,
             buttons=tuple(buttons),
         )
@@ -686,6 +848,21 @@ class Scheduler:
         self._after_change()
         return MissionResult(True, True)
 
+    def register_click(self, alarm_id: str) -> MissionResult:
+        """Count one press of a click mission. Only the scheduler decides when it is done."""
+        self.poll()
+        entry = self._ringing_entry(alarm_id)
+        if not entry.clicks_needed:
+            raise SchedulerError("This alarm has no click mission.")
+        if entry.mission_pending:
+            entry.clicks_done += 1
+        if entry.mission_pending:
+            self._emit()
+            return MissionResult(True, False)
+        self._silence(entry)
+        self._after_change()
+        return MissionResult(True, True)
+
     def stop_alarm(self, alarm_id: str) -> None:
         self.poll()
         entry = self._ringing_entry(alarm_id)
@@ -732,17 +909,19 @@ class Scheduler:
         self.ringing.clear()
         self.snoozed.clear()
         self._alarms = self.repo.list_alarms()
+        # A restored backup replaced the targets and timers, so the saved moment no longer applies.
+        self.repo.set_runtime(SESSION_KEY, None)
+        self.repo.set_runtime(TIMERS_KEY, None)
         self._restore_session()
         self._after_change()
 
     def shutdown(self) -> None:
-        """Save progress of a running target so the next launch can resume it."""
-        if self.session is None:
-            return
+        """Save the running target and timers so the next launch resumes them where they stood."""
         self.poll()
         if self.session is not None:
             self._persist_progress()
             self._log_segment(completed=False)
+        self._save_snapshot()
 
 
 class SleepMonitor:

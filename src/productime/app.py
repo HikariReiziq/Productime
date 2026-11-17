@@ -271,6 +271,8 @@ class ProductimeApp(Adw.Application):
             "open": ("s", lambda v: self.open_quick_action(v.get_string())),
             "gate-complete": (None, lambda _v: self._act(self.scheduler.complete_subtask)),
             "gate-snooze": ("i", lambda v: self._act(self.scheduler.snooze_session, v.get_int32())),
+            "ready-start": (None, lambda _v: self._act(self.scheduler.start_next_batch)),
+            "ready-extend": ("i", lambda v: self._act(self.scheduler.extend_rest, v.get_int32())),
             "alarm-stop": ("s", lambda v: self._act(self.scheduler.stop_alarm, v.get_string())),
             "alarm-snooze": ("s", lambda v: self._act(self.scheduler.snooze_alarm, v.get_string())),
             "timer-stop": ("s", lambda v: self._act(self.scheduler.dismiss_timer, v.get_string())),

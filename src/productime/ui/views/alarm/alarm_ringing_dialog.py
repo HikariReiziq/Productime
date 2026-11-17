@@ -64,6 +64,30 @@ class PasteGuardEntry(Gtk.Entry):
         self._accepted = ""
 
 
+class HeldKeyGuard(Gtk.EventControllerKey):
+    """Lets one press of Space or Enter through and swallows the auto-repeat of a held key."""
+
+    KEYS = (Gdk.KEY_space, Gdk.KEY_Return, Gdk.KEY_KP_Enter, Gdk.KEY_ISO_Enter)
+
+    def __init__(self):
+        super().__init__()
+        self.set_propagation_phase(Gtk.PropagationPhase.CAPTURE)
+        self._held: set[int] = set()
+        self.connect("key-pressed", self._on_pressed)
+        self.connect("key-released", self._on_released)
+
+    def _on_pressed(self, _controller, keyval, _keycode, _state) -> bool:
+        if keyval not in self.KEYS:
+            return False
+        if keyval in self._held:
+            return True
+        self._held.add(keyval)
+        return False
+
+    def _on_released(self, _controller, keyval, _keycode, _state) -> None:
+        self._held.discard(keyval)
+
+
 class AlarmRingingDialog(AppDialog):
     def __init__(self, window, alarm_id: str):
         super().__init__("Alarm", width=520)
@@ -94,6 +118,25 @@ class AlarmRingingDialog(AppDialog):
             self.feedback_label,
             self.submit_button,
         )
+        self.click_instruction = text_label("", "secondary", xalign=0.5, wrap=True)
+        self.click_instruction.set_justify(Gtk.Justification.CENTER)
+        self.click_button = Gtk.Button(halign=Gtk.Align.CENTER)
+        click_icon = Gtk.Image.new_from_icon_name("productime-click-symbolic")
+        click_icon.set_pixel_size(48)
+        self.click_button.set_child(click_icon)
+        self.click_button.add_css_class("click-target")
+        self.click_button.set_tooltip_text("Click to count")
+        set_accessible_label(self.click_button, "Click to count")
+        self.click_button.connect("clicked", lambda _b: self.register_click())
+        self.key_guard = HeldKeyGuard()
+        self.click_button.add_controller(self.key_guard)
+        self.click_counter = text_label("", "click-counter", "numeric", xalign=0.5)
+        self.click_progress = Gtk.ProgressBar()
+        self.click_progress.add_css_class("click-progress")
+        set_accessible_label(self.click_progress, "Clicks done")
+        self.click_box = vbox(
+            12, self.click_instruction, self.click_button, self.click_counter, self.click_progress
+        )
         self.stop_button = make_button("Stop Alarm", "primary", on_click=self.stop)
 
         self.snooze_button = make_button("Snooze", "secondary", on_click=self.snooze)
@@ -101,7 +144,14 @@ class AlarmRingingDialog(AppDialog):
         snooze_box = vbox(8, self.snooze_button, self.snooze_status)
         snooze_box.add_css_class("form-section")
 
-        for child in (self.time_label, self.name_label, self.mission_box, self.stop_button, snooze_box):
+        for child in (
+            self.time_label,
+            self.name_label,
+            self.mission_box,
+            self.click_box,
+            self.stop_button,
+            snooze_box,
+        ):
             self.body.append(child)
         self.refresh()
 
@@ -120,9 +170,19 @@ class AlarmRingingDialog(AppDialog):
         self.name_label.set_text(alarm.name)
 
         has_mission = entry.mission_total > 0
-        self.mission_box.set_visible(has_mission and entry.mission_pending)
+        clicking = bool(entry.clicks_needed) and entry.mission_pending
+        self.click_box.set_visible(clicking)
+        self.mission_box.set_visible(has_mission and entry.mission_pending and not clicking)
         self.stop_button.set_visible(not entry.mission_pending)
-        if has_mission and entry.mission_pending:
+        if clicking:
+            needed = entry.clicks_needed
+            self.click_instruction.set_text(f"Click the button {needed} times to stop the alarm.")
+            self.click_counter.set_text(f"{entry.clicks_done} / {needed}")
+            self.click_progress.set_fraction(entry.clicks_done / needed)
+            if self._shown_index != -2:
+                self._shown_index = -2
+                self.click_button.grab_focus()
+        elif has_mission and entry.mission_pending:
             typing = bool(entry.prompts)
             self.instruction_label.set_text(
                 "Type this phrase exactly to stop the alarm." if typing else "Solve this to stop the alarm."
@@ -176,6 +236,12 @@ class AlarmRingingDialog(AppDialog):
         elif not result.finished:
             self._set_feedback("Correct. One more to go.", error=False)
             self.refresh()
+
+    def register_click(self) -> None:
+        try:
+            self._scheduler.register_click(self.alarm_id)
+        except SchedulerError as error:
+            self._set_feedback(str(error), error=True)
 
     def stop(self) -> None:
         try:

@@ -41,11 +41,16 @@ Productime puts five tools in one small native window:
 
 | Tool | What it does |
 |---|---|
-| **Today / Target** | Split a goal (say 6 hours) into Pomodoro batches (`25/5`, `50/10`, or custom) with a long rest every N batches. Give each batch one subtask and watch a live timeline (`6h` becomes `6h 40m` with rests). A batch moves to its break only after you check off its subtask, and the snooze limit is enforced. |
-| **Alarm** | Repeat days, your own sound looping until you act, snooze interval and limit, and one wake-up mission: type phrases exactly (pasting is blocked) or solve math at Easy, Medium, or Hard. |
+| **Today / Target** | Split a goal (say 6 hours) into Pomodoro batches (`25/5`, `50/10`, or custom) with a long rest every N batches. Give each batch one subtask and watch a live timeline (`6h` becomes `6h 40m` with rests), in minutes from the start or in clock time. A batch moves to its break only after you check off its subtask, and the next batch starts only when you say you are back. |
+| **Alarm** | Repeat days, your own sound looping until you act, snooze interval and limit, and one wake-up mission: type phrases exactly (pasting is blocked), solve math at Easy, Medium, or Hard, or click one button 20 to 200 times. |
 | **Stopwatch** | `Start / Lap`, `Pause / Lap`, `Resume / Clear`, with the gap between laps and the change against the previous lap. |
 | **Timer** | Hours, minutes, and seconds with your own music that loops until you stop it. |
 | **Report** | Completed subtasks and focus time per day or week, an interactive chart, and CSV or JSON export. |
+
+When a break runs out, the sound loops and Productime asks whether you are ready for the next batch:
+start it, rest 5 more minutes within the snooze limit, or quit. The check button ends a break early
+after a confirmation. Quit the app at any moment and the running target and timers reopen paused at
+the exact time they had left.
 
 Creating or editing an item opens a full page beside the navigation rail, the way a phone clock app
 does. Details such as snooze, missions, long rests, and custom categories open small sheets with
@@ -58,14 +63,26 @@ Cancel and Save. Icons carry the meaning, and hovering any of them shows what it
 | ![Today view with planned targets](docs/screenshots/today-light.png) | ![Create Target page with the live batch timeline](docs/screenshots/create-target-light.png) |
 | **Focus session (dark)** | **Weekly report** |
 | ![Focus session with the countdown ring and batch timeline](docs/screenshots/focus-dark.png) | ![Weekly productivity report with chart](docs/screenshots/report-light.png) |
-| **New Alarm** | **Wake-up mission (dark)** |
-| ![New Alarm page with repeat days and the mission slot](docs/screenshots/new-alarm-light.png) | ![Mission sheet with count and difficulty tiles](docs/screenshots/mission-sheet-dark.png) |
-| **Snooze** | **Stopwatch (dark)** |
-| ![Snooze sheet with interval and limit](docs/screenshots/snooze-sheet-light.png) | ![Stopwatch with lap gaps](docs/screenshots/stopwatch-dark.png) |
-| **Timer** | **Settings (dark)** |
-| ![Timers with a running countdown](docs/screenshots/timer-light.png) | ![Settings dialog](docs/screenshots/settings-dark.png) |
-| **Welcome** | **Narrow window, 420 px** |
-| ![First launch welcome](docs/screenshots/welcome-light.png) | ![New Alarm in light](docs/screenshots/compact-alarm-light.png) ![Create Target in dark](docs/screenshots/compact-target-dark.png) |
+| **Batch complete** | **Break is over (dark)** |
+| ![Batch complete dialog with check-off and snooze choices](docs/screenshots/gate-light.png) | ![Break is over dialog asking to start the next batch](docs/screenshots/ready-dark.png) |
+| **Timeline in clock time** | **Click mission (dark)** |
+| ![Focus session with the timeline in clock time](docs/screenshots/timeline-clock-light.png) | ![Ringing alarm with the click mission button and counter](docs/screenshots/click-mission-dark.png) |
+| **Alarms** | **New Alarm** |
+| ![Alarm list with repeat days, missions, and switches](docs/screenshots/alarm-light.png) | ![New Alarm page with repeat days and the mission slot](docs/screenshots/new-alarm-light.png) |
+| **Wake-up mission (dark)** | **Snooze** |
+| ![Mission sheet with Off, Typing, Math, and Click](docs/screenshots/mission-sheet-dark.png) | ![Snooze sheet with interval and limit](docs/screenshots/snooze-sheet-light.png) |
+| **Stopwatch (dark)** | **Timer** |
+| ![Stopwatch with lap gaps](docs/screenshots/stopwatch-dark.png) | ![Timers with a running countdown](docs/screenshots/timer-light.png) |
+| **Settings (dark)** | **Welcome** |
+| ![Settings dialog](docs/screenshots/settings-dark.png) | ![First launch welcome](docs/screenshots/welcome-light.png) |
+
+**Narrow window, 420 px:** the rail becomes a bottom bar and every page keeps fitting.
+
+<p align="center">
+  <img src="docs/screenshots/compact-alarm-light.png" width="300" alt="New Alarm in a 420 px window, light theme">
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/compact-target-dark.png" width="300" alt="Create Target in a 420 px window, dark theme">
+</p>
 
 ## Tech stack
 
@@ -78,7 +95,7 @@ Cancel and Save. Icons carry the meaning, and hovering any of them shows what it
 | Audio | GStreamer `playbin` | Seamless in-process looping, released when silent |
 | Storage | SQLite in WAL mode | One local file, parameterized queries only |
 | Desktop | Gio notifications, D-Bus, systemd-logind, XDG autostart | Notification buttons, Activities search, sleep-aware timers, start at login |
-| Quality | `unittest`, `ruff`, headless mutter session | 354 tests, including a UI suite that drives the real app |
+| Quality | `unittest`, `ruff`, headless mutter session | Unit, integration, and UI suites; the UI suite drives the real app |
 
 No browser engine, no Electron, no Node.
 
@@ -88,8 +105,9 @@ No browser engine, no Electron, no Node.
   repaints while it is hidden.
 - **Hard to miss.** Sounds loop until you respond, snooze has a limit, and a mission makes sure you
   are awake before an alarm stops.
-- **Honest focus.** Breaks start only after you check off the subtask, and the report shows only
-  work you really finished.
+- **Honest focus.** Breaks start only after you check off the subtask, the next batch waits until
+  you are back, and the report shows only work you really finished.
+- **Nothing lost.** Closing the app keeps the exact time left in a batch, break, snooze, or timer.
 - **Private.** Everything stays in a local SQLite file. Back it up to JSON, restore it, or export the
   report to CSV with spreadsheet formula protection.
 - **At home in GNOME.** Notification buttons, dock quick actions, Activities search, start at login,
@@ -133,7 +151,8 @@ audio files; a missing custom sound falls back to the default alarm.
 ## GNOME integration
 
 - **Notifications** carry buttons: Stop (or Open Mission) and Snooze for alarms, Stop and Restart for
-  timers, Check Off and Snooze 5 min for a finished batch. Snooze disappears once its limit is used.
+  timers, Check Off and Snooze 5 min for a finished batch, and Start Batch N and Rest 5 min when a
+  break is over. Snooze and rest disappear once their limit is used.
 - **Start at login** starts Productime hidden; the window opens only when something needs you.
 - **Dock quick actions**: right-click the icon for New Target, New Alarm, New Timer, and Start
   Stopwatch.
@@ -153,7 +172,8 @@ Closing the window while something is running hides it instead of quitting; `Ctr
 | `Left`, `Right`, `Home`, `End` | Read the points of the report chart |
 | `Ctrl+Q` | Quit |
 
-`Escape` never silences a ringing alarm, an expired timer, or a batch waiting for check-off. It
+`Escape` never silences a ringing alarm, an expired timer, a batch waiting for check-off, or a break
+that is over. It
 collapses the alert to a bar at the top, and the sound keeps looping until you deal with it.
 
 ## Development
@@ -180,6 +200,7 @@ src/productime/ui/         GTK 4 / libadwaita window, pages, sheets, and Cairo w
 - The style follows One UI conventions; Samsung's own font is not included.
 - The typing mission accepts one character per key press, so input methods that commit several
   characters at once are treated like a paste.
+- The stopwatch is not saved when the app closes; targets and timers are.
 - Alarms ring only while Productime runs. Turn on **Start at login** to keep that true after a
   restart.
 

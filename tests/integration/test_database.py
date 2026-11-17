@@ -219,6 +219,78 @@ class AlarmAndTimerRepositoryTests(DatabaseTestCase):
         self.assertIsNotNone(self.repo.get_sound("bundled-digital"))
 
 
+class SchemaUpgradeTests(DatabaseTestCase):
+    """Alarms saved by version 1.1 must survive the upgrade that adds the click mission."""
+
+    OLD_ALARMS = (
+        "CREATE TABLE alarms (id TEXT PRIMARY KEY, name TEXT NOT NULL,"
+        " hour_24 INTEGER NOT NULL CHECK (hour_24 BETWEEN 0 AND 23),"
+        " minute INTEGER NOT NULL CHECK (minute BETWEEN 0 AND 59),"
+        " repeat_days_json TEXT NOT NULL DEFAULT '[]', sound_id TEXT NOT NULL REFERENCES sounds(id),"
+        " snooze_interval_minutes INTEGER NOT NULL DEFAULT 5"
+        " CHECK (snooze_interval_minutes IN (1,5,10,15,20,25,30)), snooze_limit INTEGER NULL,"
+        " mission_mode TEXT NOT NULL DEFAULT 'off' CHECK (mission_mode IN ('off', 'typing', 'math')),"
+        " mission_count INTEGER NOT NULL DEFAULT 1 CHECK (mission_count BETWEEN 1 AND 3),"
+        " mission_difficulty TEXT NOT NULL DEFAULT 'easy'"
+        " CHECK (mission_difficulty IN ('easy', 'medium', 'hard')),"
+        " enabled INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')))"
+    )
+
+    def make_version_1(self):
+        conn = self.repo.conn
+        conn.execute("DROP TABLE alarms")
+        conn.execute(self.OLD_ALARMS)
+        conn.execute("PRAGMA user_version = 0")
+        with conn:
+            conn.execute(
+                "INSERT INTO alarms (id, name, hour_24, minute, repeat_days_json, sound_id,"
+                " snooze_interval_minutes, snooze_limit, mission_mode, mission_count,"
+                " mission_difficulty, enabled, created_at) VALUES"
+                " ('a1', 'Kuliah pagi', 6, 30, '[1,2,3,4,5]', 'bundled-lofi', 10, 2, 'math', 3, 'hard', 1,"
+                " '2026-11-01 06:00:00')"
+            )
+
+    def test_old_alarms_keep_every_field_after_the_upgrade(self):
+        self.make_version_1()
+
+        repo = self.data.reopen()
+
+        alarm = repo.get_alarm("a1")
+        self.assertEqual(
+            (alarm.name, alarm.hour_24, alarm.minute, alarm.repeat_days),
+            ("Kuliah pagi", 6, 30, (1, 2, 3, 4, 5)),
+        )
+        self.assertEqual(
+            (alarm.sound_id, alarm.snooze_interval_minutes, alarm.snooze_limit), ("bundled-lofi", 10, 2)
+        )
+        self.assertEqual(
+            (alarm.mission_mode, alarm.mission_count, alarm.mission_difficulty), ("math", 3, "hard")
+        )
+        self.assertEqual(
+            (alarm.enabled, alarm.created_at, alarm.mission_clicks), (True, "2026-11-01 06:00:00", 30)
+        )
+        self.assertEqual(repo.conn.execute("PRAGMA user_version").fetchone()[0], 2)
+
+    def test_upgraded_database_stores_click_missions(self):
+        self.make_version_1()
+        repo = self.data.reopen()
+
+        alarm = repo.create_alarm(alarm_draft(mission_mode="click", mission_clicks=50))
+
+        self.assertEqual((alarm.mission_mode, alarm.mission_clicks), ("click", 50))
+        repo = self.data.reopen()
+        self.assertEqual(repo.get_alarm(alarm.id).mission_clicks, 50)
+
+    def test_opening_an_upgraded_database_again_changes_nothing(self):
+        alarm = self.repo.create_alarm(alarm_draft(mission_mode="click", mission_clicks=20))
+
+        repo = self.data.reopen()
+        repo = self.data.reopen()
+
+        self.assertEqual(repo.get_alarm(alarm.id).mission_clicks, 20)
+        self.assertEqual(len(repo.list_alarms()), 1)
+
+
 class PersistenceTests(DatabaseTestCase):
     def test_saved_data_survives_closing_and_reopening_the_database(self):
         target = self.repo.create_target(EXAMPLE_1)

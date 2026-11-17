@@ -1,7 +1,7 @@
 %global app_id org.productime.Productime
 
 Name:           productime
-Version:        %{?version_override}%{!?version_override:1.0.0}
+Version:        %{?version_override}%{!?version_override:1.2.0}
 Release:        1%{?dist}
 Summary:        Focus timer, alarm, stopwatch, and productivity report for GNOME
 

@@ -156,7 +156,7 @@ class TargetEditor(EditorPage):
         )
         form.set_hexpand(True)
 
-        self.timeline = VerticalTimeline(self.window.app.theme)
+        self.timeline = VerticalTimeline(self.window.app, origin=self.window.app.clock.now)
         panel = vbox(12, text_label("Timeline", "section-title"), self.timeline)
         panel.add_css_class("card")
         panel.set_size_request(300, -1)

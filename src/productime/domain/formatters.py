@@ -1,6 +1,7 @@
 """Display formatting shared by widgets, exports, and tests."""
 
 import math
+from datetime import datetime
 
 from .alarm_schedule import to_12h
 
@@ -73,3 +74,15 @@ def format_snooze_limit(limit: int | None) -> str:
     if limit is None:
         return "Unlimited"
     return "1 time" if limit == 1 else f"{limit} times"
+
+
+def format_clock(moment: datetime, twenty_four: bool = True) -> str:
+    if twenty_four:
+        return f"{moment.hour:02d}:{moment.minute:02d}"
+    hour_12, period = to_12h(moment.hour)
+    return f"{hour_12}:{moment.minute:02d} {period}"
+
+
+def format_clock_range(start: datetime, end: datetime, twenty_four: bool = True) -> str:
+    """Wall-clock times of a timeline block, in the user's desktop clock format."""
+    return f"{format_clock(start, twenty_four)} -> {format_clock(end, twenty_four)}"

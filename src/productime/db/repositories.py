@@ -269,7 +269,8 @@ class Repository:
             self.conn.execute(
                 "INSERT INTO alarms (id, name, hour_24, minute, repeat_days_json, sound_id,"
                 " snooze_interval_minutes, snooze_limit, mission_mode, mission_count,"
-                " mission_difficulty, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " mission_difficulty, enabled, mission_clicks, created_at)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (alarm_id, *self._alarm_values(draft), _now_text()),
             )
         return self.get_alarm(alarm_id)
@@ -281,7 +282,7 @@ class Repository:
             self.conn.execute(
                 "UPDATE alarms SET name = ?, hour_24 = ?, minute = ?, repeat_days_json = ?,"
                 " sound_id = ?, snooze_interval_minutes = ?, snooze_limit = ?, mission_mode = ?,"
-                " mission_count = ?, mission_difficulty = ?, enabled = ? WHERE id = ?",
+                " mission_count = ?, mission_difficulty = ?, enabled = ?, mission_clicks = ? WHERE id = ?",
                 (*self._alarm_values(draft), alarm_id),
             )
         return self.get_alarm(alarm_id)
@@ -300,6 +301,7 @@ class Repository:
             draft.mission_count,
             draft.mission_difficulty,
             int(draft.enabled),
+            draft.mission_clicks,
         )
 
     def set_alarm_enabled(self, alarm_id: str, enabled: bool) -> None:
@@ -330,6 +332,7 @@ class Repository:
             mission_difficulty=row["mission_difficulty"],
             enabled=bool(row["enabled"]),
             created_at=row["created_at"],
+            mission_clicks=row["mission_clicks"],
         )
 
     def list_timers(self) -> list[TimerPreset]:
@@ -486,6 +489,22 @@ class Repository:
                 (key, value),
             )
 
+    def get_runtime(self, key: str) -> str | None:
+        row = self.conn.execute("SELECT value FROM runtime_state WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else None
+
+    def set_runtime(self, key: str, value: str | None) -> None:
+        """Store or, with None, forget one piece of runtime state."""
+        with self.conn:
+            if value is None:
+                self.conn.execute("DELETE FROM runtime_state WHERE key = ?", (key,))
+            else:
+                self.conn.execute(
+                    "INSERT INTO runtime_state (key, value) VALUES (?, ?)"
+                    " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )
+
     def export_rows(self) -> dict:
         """Plain rows for a JSON backup. Bundled sounds are reseeded, so only custom ones go out."""
 
@@ -593,7 +612,8 @@ class Repository:
             self.conn.executemany(
                 "INSERT INTO alarms (id, name, hour_24, minute, repeat_days_json, sound_id,"
                 " snooze_interval_minutes, snooze_limit, mission_mode, mission_count,"
-                " mission_difficulty, enabled, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                " mission_difficulty, enabled, created_at, mission_clicks)"
+                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 [
                     (
                         a["id"],
@@ -609,6 +629,7 @@ class Repository:
                         a["mission_difficulty"],
                         a["enabled"],
                         a["created_at"],
+                        a["mission_clicks"],
                     )
                     for a in data["alarms"]
                 ],

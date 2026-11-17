@@ -25,6 +25,8 @@ def mission_text(alarm: Alarm) -> str | None:
         return f"Typing {alarm.mission_count}x"
     if alarm.mission_mode == "math":
         return f"Math {alarm.mission_difficulty.capitalize()} {alarm.mission_count}x"
+    if alarm.mission_mode == "click":
+        return f"Click {alarm.mission_clicks}x"
     return None
 
 
@@ -103,6 +105,7 @@ class AlarmView(Gtk.Box):
         self.states.show_content()
 
     def _build_card(self, alarm: Alarm, sound_name: str) -> Gtk.Box:
+        """Time and switch on top, then the name, the schedule, and the badges beside the actions."""
         locked = self.scheduler.is_alarm_locked(alarm.id)
         ringing = any(entry.alarm.id == alarm.id for entry in self.scheduler.ringing)
 
@@ -116,19 +119,35 @@ class AlarmView(Gtk.Box):
         switch.connect("notify::active", self._on_switch, alarm.id)
 
         name = text_label(alarm.name, "card-title", ellipsize=True)
-        pills = wrap_row(spacing=4)
-        for day, short in enumerate(WEEKDAY_SHORT, start=1):
-            pill = text_label(short, "day-pill", xalign=0.5)
-            if day in alarm.repeat_days:
-                pill.add_css_class("active")
-            pills.append(pill)
-        # Active days are also written out, so the schedule never depends on color alone.
+
+        # Day pills only for repeating alarms; a one-time alarm just says Once.
+        schedule = wrap_row(spacing=8)
+        if alarm.repeat_days:
+            pills = Gtk.Box(spacing=2, valign=Gtk.Align.CENTER)
+            for day, short in enumerate(WEEKDAY_SHORT, start=1):
+                pill = text_label(short[:2], "day-pill", xalign=0.5)
+                if day in alarm.repeat_days:
+                    pill.add_css_class("active")
+                pills.append(pill)
+            schedule.append(pills)
+        # Active days are also written out, so the schedule never depends on colour alone.
         repeat = text_label(describe_repeat(alarm.repeat_days), "secondary", "small")
+        repeat.set_valign(Gtk.Align.CENTER)
+        if alarm.enabled:
+            when = self.scheduler.next_ring_for(alarm)
+            next_text = f"Rings {format_relative(when - self.window.app.clock.now())}"
+        else:
+            next_text = "Off"
+        next_label = text_label(next_text, "secondary", "small", "numeric")
+        next_label.set_valign(Gtk.Align.CENTER)
+        schedule.append(hbox(6, repeat, text_label("\u00b7", "muted", "small"), next_label))
 
         sound_chip = chip(sound_name)
         sound_chip.set_max_width_chars(24)
         sound_chip.set_ellipsize(Pango.EllipsizeMode.END)
         badges = wrap_row(sound_chip, spacing=6)
+        badges.set_hexpand(True)
+        badges.set_valign(Gtk.Align.CENTER)
         mission = mission_text(alarm)
         if mission:
             badges.append(chip(mission, "study"))
@@ -137,22 +156,18 @@ class AlarmView(Gtk.Box):
         elif locked:
             badges.append(chip("Snoozed", "rest"))
 
-        if alarm.enabled:
-            when = self.scheduler.next_ring_for(alarm)
-            next_text = f"Rings {format_relative(when - self.window.app.clock.now())}"
-        else:
-            next_text = "Off"
-        next_label = text_label(next_text, "secondary", "small", "numeric")
-        next_label.set_hexpand(True)
         edit = icon_button("document-edit-symbolic", "Edit alarm", on_click=lambda: self.edit(alarm))
         delete = icon_button("user-trash-symbolic", "Delete alarm", on_click=lambda: self.ask_delete(alarm))
         edit.set_sensitive(not locked)
         delete.set_sensitive(not locked)
+        actions = hbox(4, edit, delete)
+        actions.set_valign(Gtk.Align.CENTER)
 
-        card = vbox(
-            6, hbox(12, time_label, switch), name, pills, repeat, badges, hbox(4, next_label, edit, delete)
-        )
+        card = vbox(4, hbox(12, time_label, switch), name, schedule, hbox(8, badges, actions))
         card.add_css_class("row-card")
+        card.add_css_class("alarm-card")
+        if not alarm.enabled:
+            card.add_css_class("off")
         self.cards[alarm.id] = {
             "card": card,
             "time": time_label,

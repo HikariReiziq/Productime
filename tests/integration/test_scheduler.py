@@ -104,16 +104,64 @@ class TargetSessionTests(SchedulerTestCase):
         self.assertEqual(self.phase, TargetPhase.RESTING)
         self.assertEqual(self.report().total_seconds, 12 * MIN)
 
-    def test_rest_ends_by_starting_the_next_batch(self):
+    def test_rest_ends_by_asking_before_the_next_batch(self):
         target = self.start()
         self.scheduler.complete_subtask()
 
         self.run_for(10 * MIN, step=30)
+        self.run_for(30 * MIN, step=60)
+
+        state = self.scheduler.session.state
+        self.assertEqual((state.phase, state.batch_index), (TargetPhase.READY_FOR_NEXT, 1))
+        alert = self.scheduler.current_alert()
+        self.assertEqual((alert.kind, alert.title), ("ready", "Membuat desain"))
+        self.assertEqual(self.audio.alert_sound_id, "bundled-digital")
+        self.assertIn("Break is over", self.notifier.titles())
+        self.assertTrue(self.scheduler.has_background_work())
+        self.assertEqual(self.report().total_seconds, 0, "rest and waiting are not focus time")
+
+        self.scheduler.start_next_batch()
+
+        state = self.scheduler.session.state
+        self.assertEqual(
+            (state.phase, state.batch_index, state.remaining_ms), (TargetPhase.WORKING, 2, 50 * MIN * 1000)
+        )
+        self.assertIsNone(self.audio.alert_sound_id)
+        self.assertNotIn("target-ready", self.notifier.active)
+        self.assertEqual(self.repo.get_target(target.id).batches[1].status, "active")
+
+    def test_checking_during_a_rest_starts_the_next_batch_at_once(self):
+        self.start()
+        self.scheduler.complete_subtask()
+        self.run_for(3 * MIN, step=30)
+
+        self.scheduler.start_next_batch()
 
         state = self.scheduler.session.state
         self.assertEqual((state.phase, state.batch_index), (TargetPhase.WORKING, 2))
-        self.assertEqual(self.repo.get_target(target.id).batches[1].status, "active")
-        self.assertIn("Batch 2 started", self.notifier.titles())
+        self.run_for(MIN, step=30)
+        self.assertEqual(state.remaining_ms, 50 * MIN * 1000)
+        self.assertEqual(self.scheduler.session.state.remaining_ms, 49 * MIN * 1000)
+
+    def test_a_rest_can_be_extended_within_the_snooze_limit(self):
+        self.start()
+        self.scheduler.complete_subtask()
+        self.run_for(10 * MIN, step=30)
+        first_key = self.scheduler.current_alert().key
+
+        self.scheduler.extend_rest(5)
+
+        self.assertEqual(self.phase, TargetPhase.RESTING)
+        self.assertIsNone(self.audio.alert_sound_id)
+        self.run_for(5 * MIN, step=30)
+        self.assertEqual(self.phase, TargetPhase.READY_FOR_NEXT)
+        self.assertNotEqual(self.scheduler.current_alert().key, first_key)
+        for _ in range(2):
+            self.scheduler.extend_rest(5)
+            self.run_for(5 * MIN, step=30)
+        with self.assertRaises(target_engine.InvalidTransition):
+            self.scheduler.extend_rest(5)
+        self.assertEqual(self.report().total_seconds, 0)
 
     def test_snooze_extends_work_and_its_time_is_logged(self):
         self.start()
@@ -152,6 +200,7 @@ class TargetSessionTests(SchedulerTestCase):
         target = self.start(short_target())
         self.scheduler.complete_subtask()
         self.run_for(1 * MIN, step=5)
+        self.scheduler.start_next_batch()
         self.run_for(1 * MIN, step=5)
 
         self.scheduler.complete_subtask()
@@ -167,6 +216,7 @@ class TargetSessionTests(SchedulerTestCase):
         target = self.start(short_target())
         self.scheduler.complete_subtask()
         self.run_for(1 * MIN, step=5)
+        self.scheduler.start_next_batch()
         self.scheduler.complete_subtask()
 
         self.run_for(1 * MIN, step=5)
@@ -241,6 +291,85 @@ class TargetSessionTests(SchedulerTestCase):
         self.assertEqual(restarted.session.state.remaining_ms, 30 * MIN * 1000)
         self.assertFalse(restarted.has_background_work())
 
+    def test_a_rest_reopens_paused_with_its_exact_time_left(self):
+        target = self.start()
+        self.scheduler.complete_subtask()
+        self.run_for(3 * MIN + 17.25, step=0.75)
+        self.scheduler.shutdown()
+
+        restarted = self.make_scheduler()
+
+        state = restarted.session.state
+        self.assertEqual(restarted.session.target.id, target.id)
+        self.assertEqual((state.phase, state.batch_index), (TargetPhase.PAUSED_REST, 1))
+        self.assertEqual(state.remaining_ms, 10 * MIN * 1000 - 197_250)
+
+    def test_a_snooze_reopens_paused_with_its_exact_time_left(self):
+        self.start()
+        self.run_for(50 * MIN, step=60)
+        self.scheduler.snooze_session(10)
+        self.run_for(4 * MIN + 0.5, step=0.5)
+        self.scheduler.shutdown()
+
+        restarted = self.make_scheduler()
+
+        state = restarted.session.state
+        self.assertEqual(
+            (state.phase, state.remaining_ms, state.snooze_count), (TargetPhase.PAUSED_WORK, 359_500, 1)
+        )
+        restarted.resume_session()
+        self.assertEqual(restarted.session.state.phase, TargetPhase.SNOOZING)
+
+    def test_a_waiting_gate_reopens_silently_and_resumes_at_the_gate(self):
+        self.start()
+        self.run_for(50 * MIN, step=60)
+        self.scheduler.shutdown()
+
+        restarted = self.make_scheduler()
+
+        self.assertEqual(restarted.session.state.phase, TargetPhase.PAUSED_WORK)
+        self.assertIsNone(restarted.current_alert())
+        restarted.resume_session()
+        self.assertEqual(restarted.current_alert().kind, "gate")
+
+    def test_waiting_to_start_reopens_as_the_next_batch_paused(self):
+        self.start()
+        self.scheduler.complete_subtask()
+        self.run_for(10 * MIN, step=60)
+        self.scheduler.shutdown()
+
+        restarted = self.make_scheduler()
+
+        state = restarted.session.state
+        self.assertEqual(
+            (state.phase, state.batch_index, state.remaining_ms),
+            (TargetPhase.PAUSED_WORK, 2, 50 * MIN * 1000),
+        )
+        self.assertIsNone(restarted.current_alert())
+
+    def test_a_crash_keeps_the_time_left_from_the_last_regular_save(self):
+        self.start()
+        self.run_for(20 * MIN + 10, step=5)
+
+        restarted = self.make_scheduler()
+
+        remaining = restarted.session.state.remaining_ms
+        self.assertEqual(restarted.session.state.phase, TargetPhase.PAUSED_WORK)
+        self.assertLessEqual(remaining - (30 * MIN - 10) * 1000, 30_000)
+        self.assertGreaterEqual(remaining, (30 * MIN - 10) * 1000)
+
+    def test_quitting_the_target_drops_the_saved_rest(self):
+        self.start()
+        self.scheduler.complete_subtask()
+        self.run_for(MIN, step=30)
+        self.scheduler.quit_session()
+
+        restarted = self.make_scheduler()
+
+        state = restarted.session.state
+        self.assertEqual((state.phase, state.batch_index), (TargetPhase.PAUSED_WORK, 2))
+        self.assertEqual(state.remaining_ms, 50 * MIN * 1000)
+
     def test_only_one_target_runs_at_a_time(self):
         self.start()
         other = self.repo.create_target(short_target())
@@ -251,7 +380,8 @@ class TargetSessionTests(SchedulerTestCase):
     def test_completed_target_can_be_run_again_from_the_start(self):
         target = self.start(short_target())
         self.scheduler.complete_subtask()
-        self.run_for(2 * MIN, step=5)
+        self.run_for(1 * MIN, step=5)
+        self.scheduler.start_next_batch()
         self.scheduler.complete_subtask()
         self.scheduler.finish_target()
 
@@ -289,6 +419,36 @@ class TimerTests(SchedulerTestCase):
 
         self.assertIsNone(self.audio.alert_sound_id)
         self.assertIsNone(self.run_state())
+
+    def test_running_and_paused_timers_reopen_paused_with_their_time_left(self):
+        other = self.repo.create_timer(timer_draft(name="Laundry", duration_seconds=600))
+        self.scheduler.start_timer(self.timer.id)
+        self.scheduler.start_timer(other.id)
+        self.run_for(20.5, step=0.5)
+        self.scheduler.pause_timer(other.id)
+        self.run_for(10, step=1)
+        self.scheduler.shutdown()
+
+        restarted = self.make_scheduler()
+
+        tea, laundry = restarted.timer_run(self.timer.id), restarted.timer_run(other.id)
+        self.assertEqual((tea.status, tea.remaining_ms, tea.name), ("paused", 59_500, "Tea"))
+        self.assertEqual((laundry.status, laundry.remaining_ms), ("paused", 579_500))
+        self.assertIsNone(restarted.current_alert())
+        restarted.resume_timer(self.timer.id)
+        self.assertEqual(restarted.timer_run(self.timer.id).status, "running")
+
+    def test_an_expired_or_deleted_timer_is_not_brought_back(self):
+        short = self.repo.create_timer(timer_draft(name="Egg", duration_seconds=5))
+        self.scheduler.start_timer(short.id)
+        self.scheduler.start_timer(self.timer.id)
+        self.run_for(6, step=1)
+        self.repo.delete_timer(self.timer.id)
+        self.scheduler.shutdown()
+
+        restarted = self.make_scheduler()
+
+        self.assertEqual(restarted.timers, {})
 
     def test_restart_from_the_expired_state_runs_the_full_duration_again(self):
         self.scheduler.start_timer(self.timer.id)
@@ -474,6 +634,45 @@ class AlarmTests(SchedulerTestCase):
         self.assertTrue(result.finished)
         self.assertEqual(self.ringing_ids(), [])
 
+    def test_click_mission_stops_only_after_the_last_click(self):
+        alarm = self.repo.create_alarm(alarm_draft(mission_mode="click", mission_clicks=20))
+        self.scheduler.refresh_alarms()
+        self.run_for(5 * MIN, step=1)
+
+        with self.assertRaises(SchedulerError):
+            self.scheduler.stop_alarm(alarm.id)
+        for done in range(1, 20):
+            result = self.scheduler.register_click(alarm.id)
+            self.assertFalse(result.finished)
+            self.assertEqual(self.scheduler.ringing[0].clicks_done, done)
+        self.assertEqual(self.audio.alert_sound_id, "bundled-digital")
+
+        self.assertTrue(self.scheduler.register_click(alarm.id).finished)
+        self.assertEqual(self.scheduler.ringing, [])
+        self.assertIsNone(self.audio.alert_sound_id)
+
+    def test_a_snoozed_click_mission_starts_from_zero_when_it_rings_again(self):
+        alarm = self.repo.create_alarm(alarm_draft(mission_mode="click", mission_clicks=10, snooze_limit=1))
+        self.scheduler.refresh_alarms()
+        self.run_for(5 * MIN, step=1)
+        for _ in range(7):
+            self.scheduler.register_click(alarm.id)
+
+        self.scheduler.snooze_alarm(alarm.id)
+        self.run_for(5 * MIN, step=1)
+
+        entry = self.scheduler.ringing[0]
+        self.assertEqual((entry.clicks_done, entry.clicks_needed), (0, 10))
+        self.assertEqual(self.notifier.button_labels(f"alarm-{alarm.id}"), ["Open Mission"])
+
+    def test_clicks_only_count_for_a_click_mission(self):
+        alarm = self.repo.create_alarm(alarm_draft(mission_mode="math"))
+        self.scheduler.refresh_alarms()
+        self.run_for(5 * MIN, step=1)
+
+        with self.assertRaises(SchedulerError):
+            self.scheduler.register_click(alarm.id)
+
     def test_ringing_alarm_is_locked_against_edit_and_delete(self):
         alarm = self.add(mission_mode="typing")
         self.assertFalse(self.scheduler.is_alarm_locked(alarm.id))
@@ -601,6 +800,22 @@ class NotificationButtonTests(SchedulerTestCase):
         self.run_for(5 * MIN, step=1)
 
         self.assertEqual(self.notifier.button_labels(f"alarm-{alarm.id}"), ["Open Mission"])
+
+    def test_ready_notification_offers_start_and_a_rest_while_extensions_remain(self):
+        target = self.repo.create_target(short_target(snooze_limit=1))
+        self.scheduler.start_target(target.id)
+        self.scheduler.complete_subtask()
+        self.run_for(MIN, step=5)
+
+        self.assertEqual(
+            self.notifier.buttons["target-ready"],
+            (("Start Batch 2", "app.ready-start", None), ("Rest 5 min", "app.ready-extend", 5)),
+        )
+        self.scheduler.extend_rest(1)
+        self.assertNotIn("target-ready", self.notifier.active)
+        self.run_for(MIN, step=5)
+
+        self.assertEqual(self.notifier.button_labels("target-ready"), ["Start Batch 2"])
 
     def test_expired_timer_offers_stop_and_restart(self):
         timer = self.repo.create_timer(timer_draft(duration_seconds=10))

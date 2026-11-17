@@ -9,8 +9,10 @@ ALARM_SNOOZE_INTERVALS = (1, 5, 10, 15, 20, 25, 30)
 TARGET_SNOOZE_MINUTES = (1, 3, 5, 10)
 TAG_COLORS = {"Work": "red", "Study": "purple", "Coding": "blue", "Personal": "amber"}
 TAG_LABELS = tuple(TAG_COLORS)
-MISSION_MODES = ("off", "typing", "math")
+MISSION_MODES = ("off", "typing", "math", "click")
 MISSION_DIFFICULTIES = ("easy", "medium", "hard")
+CLICK_PRESETS = (20, 30, 50)
+MIN_CLICKS, MAX_CLICKS, DEFAULT_CLICKS = 10, 200, 30
 DEFAULT_SOUND_ID = "bundled-digital"
 
 
@@ -22,6 +24,8 @@ class TargetPhase(StrEnum):
     SNOOZING = "snoozing"
     RESTING = "resting"
     PAUSED_REST = "paused_rest"
+    # A break ran out: the next batch waits until the user says they are back.
+    READY_FOR_NEXT = "ready_for_next"
     COMPLETED = "completed"
 
 
@@ -123,6 +127,7 @@ class Alarm:
     mission_difficulty: str
     enabled: bool
     created_at: str = ""
+    mission_clicks: int = DEFAULT_CLICKS
 
 
 @dataclass(frozen=True)
@@ -138,6 +143,7 @@ class AlarmDraft:
     mission_count: int = 1
     mission_difficulty: str = "easy"
     enabled: bool = True
+    mission_clicks: int = DEFAULT_CLICKS
 
 
 @dataclass

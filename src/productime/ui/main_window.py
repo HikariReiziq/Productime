@@ -27,9 +27,13 @@ NAV_ITEMS = (
     ("report", "Report", "productime-report-symbolic"),
 )
 COMPACT_CONDITION = "max-width: 899px"
+# A full-screen or large window: clocks and the timeline grow to use the space.
+LARGE_CONDITION = "min-width: 1400px and min-height: 860px"
+LARGE_PAGE_WIDTH = 1600
 ALERT_BAR_TEXT = {
     "alarm": "Alarm ringing: {title}",
     "gate": "Waiting for check-off: {title}",
+    "ready": "Break is over: {title}",
     "timer": "Timer finished: {title}",
 }
 
@@ -177,6 +181,12 @@ class ProductimeWindow(Adw.ApplicationWindow):
         breakpoint_.connect("apply", lambda _b: self._set_compact(True))
         breakpoint_.connect("unapply", lambda _b: self._set_compact(False))
         self.add_breakpoint(breakpoint_)
+
+        large = Adw.Breakpoint.new(Adw.BreakpointCondition.parse(LARGE_CONDITION))
+        large.add_setter(self.page, "maximum-size", LARGE_PAGE_WIDTH)
+        large.connect("apply", lambda _b: self.add_css_class("large"))
+        large.connect("unapply", lambda _b: self.remove_css_class("large"))
+        self.add_breakpoint(large)
 
     def _brand_image(self, size: int) -> Gtk.Image:
         image = Gtk.Image(accessible_role=Gtk.AccessibleRole.PRESENTATION)
@@ -348,6 +358,10 @@ class ProductimeWindow(Adw.ApplicationWindow):
 
     def _set_compact(self, compact: bool) -> None:
         self.compact = compact
+        if compact:
+            self.add_css_class("compact")
+        else:
+            self.remove_css_class("compact")
         for view in (*self._views.values(), *self._editors.values()):
             view.set_compact(compact)
 
@@ -426,7 +440,9 @@ class ProductimeWindow(Adw.ApplicationWindow):
     def _update_live_pill(self) -> None:
         session = self.scheduler.session
         running = [r for r in self.scheduler.timers.values() if r.status == "running"]
-        if session is not None and session.state.phase is not TargetPhase.COMPLETED:
+        if session is not None and session.state.phase is TargetPhase.READY_FOR_NEXT:
+            text = f"{session.target.name}  \u00b7  Ready for Batch {session.state.batch_index + 1}"
+        elif session is not None and session.state.phase is not TargetPhase.COMPLETED:
             state = session.state
             text = (
                 f"{session.target.name}  \u00b7  Batch {state.batch_index}/{state.batch_count}  "
@@ -476,6 +492,10 @@ class ProductimeWindow(Adw.ApplicationWindow):
             from .views.target.subtask_gate_dialog import SubtaskGateDialog
 
             dialog = SubtaskGateDialog(self)
+        elif alert.kind == "ready":
+            from .views.target.next_batch_dialog import NextBatchDialog
+
+            dialog = NextBatchDialog(self)
         else:
             from .views.timer.timer_expired_dialog import TimerExpiredDialog
 

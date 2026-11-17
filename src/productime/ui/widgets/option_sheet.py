@@ -112,23 +112,32 @@ class OptionSheet(AppDialog):
         self.saved = True
         self.close()
 
-    def reserve_height(self) -> None:
+    def reserve_height(self, arrangements: Sequence[Callable[[], None]] = ()) -> None:
         """Size the sheet for its tallest state, because libadwaita does not regrow a floating dialog
-        when a hidden section appears later."""
-        hidden, stack = [], [self.cards]
+        when a hidden section appears later.
+
+        Each arrangement shows one combination of sections that can really appear together.
+        Without any, every hidden part is measured as shown at once.
+        """
+        if not arrangements:
+            arrangements = (self._show_everything,)
+        tallest = 0
+        for arrange in arrangements:
+            arrange()
+            tallest = max(
+                tallest, self.toolbar.measure(Gtk.Orientation.VERTICAL, self.get_content_width())[1]
+            )
+        self.set_content_height(tallest)
+
+    def _show_everything(self) -> None:
+        stack = [self.cards]
         while stack:
             widget = stack.pop()
-            if not widget.get_visible():
-                hidden.append(widget)
-                widget.set_visible(True)
+            widget.set_visible(True)
             child = widget.get_first_child()
             while child is not None:
                 stack.append(child)
                 child = child.get_next_sibling()
-        natural = self.toolbar.measure(Gtk.Orientation.VERTICAL, self.get_content_width())[1]
-        for widget in hidden:
-            widget.set_visible(False)
-        self.set_content_height(natural)
 
     def present_over(self, parent: Gtk.Widget) -> None:
         self.present(parent)

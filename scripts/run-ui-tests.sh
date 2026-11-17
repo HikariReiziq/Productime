@@ -43,7 +43,7 @@ if [ -x /usr/libexec/at-spi-bus-launcher ]; then
         sleep 0.3
     fi
 fi
-mutter --headless --wayland --no-x11 --virtual-monitor 1280x800 -- \
+mutter --headless --wayland --no-x11 --virtual-monitor 1920x1080 -- \
     sh -c '"'"'"$@"; echo $? > "$PRODUCTIME_UI_STATUS_FILE"'"'"' _ "$@"
 for pid in "${helpers[@]}"; do kill "$pid" 2>/dev/null; done
 exit 0

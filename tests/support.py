@@ -128,16 +128,20 @@ class RecordingNotifier:
         self.sent: list[tuple[str, str, str]] = []
         self.withdrawn: list[str] = []
         self.buttons: dict[str, tuple] = {}
+        # Keys shown and not yet withdrawn: what the GNOME notification list would still hold.
+        self.active: set[str] = set()
 
     def notify(self, key, title, body, urgent=False, buttons=()):
         self.sent.append((key, title, body))
         self.buttons[key] = tuple(buttons)
+        self.active.add(key)
 
     def button_labels(self, key) -> list[str]:
         return [label for label, _action, _target in self.buttons.get(key, ())]
 
     def withdraw(self, key):
         self.withdrawn.append(key)
+        self.active.discard(key)
 
     def titles(self) -> list[str]:
         return [title for _key, title, _body in self.sent]

@@ -6,6 +6,9 @@ from dataclasses import replace
 from . import target_engine
 from .models import (
     ALARM_SNOOZE_INTERVALS,
+    DEFAULT_CLICKS,
+    MAX_CLICKS,
+    MIN_CLICKS,
     MISSION_DIFFICULTIES,
     MISSION_MODES,
     SNOOZE_LIMIT_CHOICES,
@@ -42,6 +45,7 @@ PREFERENCE_RULES = {
     "notify_timers": lambda v: v in _FLAG,
     "notify_targets": lambda v: v in _FLAG,
     "onboarding_done": lambda v: v in _FLAG,
+    "timeline_clock": lambda v: v in _FLAG,
 }
 
 _ID_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
@@ -154,6 +158,7 @@ def validate_alarm_draft(draft: AlarmDraft) -> AlarmDraft:
     if draft.snooze_interval_minutes not in ALARM_SNOOZE_INTERVALS:
         raise ValidationError("snooze_interval_minutes", "Choose a snooze interval from the list.")
     _mission(draft.mission_mode, draft.mission_count, draft.mission_difficulty)
+    _int_in(draft.mission_clicks, "mission_clicks", MIN_CLICKS, MAX_CLICKS)
     return replace(
         draft,
         name=name,
@@ -339,6 +344,8 @@ def _backup_alarm(raw: object) -> dict:
         mode, count, difficulty = _mission(
             row["mission_mode"], row["mission_count"], row["mission_difficulty"]
         )
+        # Backups from before the click mission have no click count.
+        clicks = _int_in(row.get("mission_clicks", DEFAULT_CLICKS), section, MIN_CLICKS, MAX_CLICKS)
     except ValidationError as error:
         raise ValidationError(section, f"Backup section '{section}' holds an invalid alarm.") from error
     if row["snooze_interval_minutes"] not in ALARM_SNOOZE_INTERVALS or isinstance(
@@ -357,6 +364,7 @@ def _backup_alarm(raw: object) -> dict:
         "mission_mode": mode,
         "mission_count": count,
         "mission_difficulty": difficulty,
+        "mission_clicks": clicks,
         "enabled": _flag(row["enabled"], section),
         "created_at": _timestamp(row.get("created_at", "1970-01-01 00:00:00"), section),
     }

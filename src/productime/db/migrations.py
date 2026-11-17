@@ -53,11 +53,12 @@ CREATE TABLE IF NOT EXISTS alarms (
   sound_id TEXT NOT NULL REFERENCES sounds(id),
   snooze_interval_minutes INTEGER NOT NULL DEFAULT 5 CHECK (snooze_interval_minutes IN (1,5,10,15,20,25,30)),
   snooze_limit INTEGER NULL,
-  mission_mode TEXT NOT NULL DEFAULT 'off' CHECK (mission_mode IN ('off', 'typing', 'math')),
+  mission_mode TEXT NOT NULL DEFAULT 'off' CHECK (mission_mode IN ('off', 'typing', 'math', 'click')),
   mission_count INTEGER NOT NULL DEFAULT 1 CHECK (mission_count BETWEEN 1 AND 3),
   mission_difficulty TEXT NOT NULL DEFAULT 'easy' CHECK (mission_difficulty IN ('easy', 'medium', 'hard')),
   enabled INTEGER NOT NULL DEFAULT 1,
-  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  mission_clicks INTEGER NOT NULL DEFAULT 30 CHECK (mission_clicks BETWEEN 10 AND 200)
 );
 
 CREATE TABLE IF NOT EXISTS timers (
@@ -87,6 +88,12 @@ CREATE TABLE IF NOT EXISTS app_preferences (
   value TEXT NOT NULL
 );
 
+-- Where a running target or timer stood when the app closed. Never part of a backup.
+CREATE TABLE IF NOT EXISTS runtime_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_target_batches_target ON target_batches(target_id, batch_index);
 CREATE INDEX IF NOT EXISTS idx_focus_logs_date ON focus_logs(local_date_key);
 """
@@ -102,8 +109,56 @@ BUNDLED_SOUNDS = (
 )
 
 
+SCHEMA_VERSION = 2
+
+# Version 2 adds the click mission. SQLite cannot change a CHECK constraint in place, so the
+# alarms table is rebuilt and every row copied, all in one transaction.
+ALARMS_UPGRADE = """
+CREATE TABLE alarms_upgrade (
+  id TEXT PRIMARY KEY,
+  name TEXT NOT NULL,
+  hour_24 INTEGER NOT NULL CHECK (hour_24 BETWEEN 0 AND 23),
+  minute INTEGER NOT NULL CHECK (minute BETWEEN 0 AND 59),
+  repeat_days_json TEXT NOT NULL DEFAULT '[]',
+  sound_id TEXT NOT NULL REFERENCES sounds(id),
+  snooze_interval_minutes INTEGER NOT NULL DEFAULT 5 CHECK (snooze_interval_minutes IN (1,5,10,15,20,25,30)),
+  snooze_limit INTEGER NULL,
+  mission_mode TEXT NOT NULL DEFAULT 'off' CHECK (mission_mode IN ('off', 'typing', 'math', 'click')),
+  mission_count INTEGER NOT NULL DEFAULT 1 CHECK (mission_count BETWEEN 1 AND 3),
+  mission_difficulty TEXT NOT NULL DEFAULT 'easy' CHECK (mission_difficulty IN ('easy', 'medium', 'hard')),
+  enabled INTEGER NOT NULL DEFAULT 1,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  mission_clicks INTEGER NOT NULL DEFAULT 30 CHECK (mission_clicks BETWEEN 10 AND 200)
+);
+"""
+
+def _upgrade_alarms(conn: sqlite3.Connection) -> None:
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(alarms)").fetchall()}
+    if "mission_clicks" in columns:
+        return
+    conn.execute("BEGIN IMMEDIATE")
+    try:
+        conn.execute(ALARMS_UPGRADE)
+        conn.execute(
+            "INSERT INTO alarms_upgrade (id, name, hour_24, minute, repeat_days_json, sound_id,"
+            " snooze_interval_minutes, snooze_limit, mission_mode, mission_count, mission_difficulty,"
+            " enabled, created_at) SELECT id, name, hour_24, minute, repeat_days_json, sound_id,"
+            " snooze_interval_minutes, snooze_limit, mission_mode, mission_count, mission_difficulty,"
+            " enabled, created_at FROM alarms"
+        )
+        conn.execute("DROP TABLE alarms")
+        conn.execute("ALTER TABLE alarms_upgrade RENAME TO alarms")
+        conn.commit()
+    except sqlite3.Error:
+        conn.rollback()
+        raise
+
+
 def apply(conn: sqlite3.Connection) -> None:
     conn.executescript(SCHEMA)
+    if conn.execute("PRAGMA user_version").fetchone()[0] < SCHEMA_VERSION:
+        _upgrade_alarms(conn)
+        conn.execute("PRAGMA user_version = 2")
     with conn:
         conn.executemany(
             "INSERT OR IGNORE INTO sounds (id, display_name, source_type, file_path, duration_seconds)"

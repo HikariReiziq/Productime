@@ -8,57 +8,85 @@ from ....domain.validation import MAX_SNOOZE_MINUTES
 from ....services.scheduler_service import SchedulerError
 from ...widgets.controls import (
     AppDialog,
-    field,
+    hbox,
     make_button,
+    set_accessible_label,
     set_button_text,
     spin,
     spin_value,
     text_label,
     vbox,
-    wrap_row,
 )
+from .next_batch_dialog import session_card
 
 LIMIT_REACHED = "Snooze limit reached. Complete the subtask to rest or quit target."
 
 
 class SubtaskGateDialog(AppDialog):
     def __init__(self, window):
-        super().__init__("Batch complete", width=520)
+        super().__init__("Batch complete", width=480)
         self._window = window
         self._scheduler = window.scheduler
 
-        self.prompt_label = text_label("", "section-title", wrap=True)
+        self.heading_label = text_label("", "alert-heading", xalign=0.5, wrap=True)
+        self.prompt_label = text_label("", "section-title", xalign=0.5, wrap=True)
+        self.prompt_label.set_justify(Gtk.Justification.CENTER)
         self.complete_button = make_button(
-            "Check Subtask & Start Break", "primary", on_click=self.complete, icon="object-select-symbolic"
+            "Check Subtask & Start Break",
+            "primary",
+            "alert-primary",
+            on_click=self.complete,
+            icon="object-select-symbolic",
         )
+        self.complete_button.set_hexpand(True)
+
+        # Equal-width snooze choices on one row, like the option sheets, so nothing wraps unevenly.
         self.snooze_buttons = {
-            minutes: make_button(f"{minutes} min", "secondary", on_click=lambda m=minutes: self.snooze(m))
+            minutes: make_button(f"{minutes} min", on_click=lambda m=minutes: self.snooze(m))
             for minutes in TARGET_SNOOZE_MINUTES
         }
+        snooze_row = Gtk.Box(spacing=6, homogeneous=True)
+        snooze_row.add_css_class("choice-group")
+        snooze_row.add_css_class("fill")
+        for button in self.snooze_buttons.values():
+            button.set_hexpand(True)
+            button.set_tooltip_text(f"Work {button.get_label()} more, then check off")
+            snooze_row.append(button)
         self.custom_spin = spin(1, MAX_SNOOZE_MINUTES, 15)
+        self.custom_spin.set_tooltip_text("Custom snooze minutes")
+        set_accessible_label(self.custom_spin, "Custom snooze minutes")
         self.custom_button = make_button(
             "Snooze", "secondary", on_click=lambda: self.snooze(spin_value(self.custom_spin))
         )
-        self.custom_button.set_valign(Gtk.Align.END)
-        self.snooze_status = text_label("", "secondary", wrap=True)
-        self.error_label = text_label("", "error-text", wrap=True)
-        self.error_label.set_visible(False)
-        self.quit_button = make_button("Quit Target", "destructive-outline", on_click=self.quit_target)
-        self.quit_button.set_halign(Gtk.Align.START)
-
-        snooze_section = vbox(
-            10,
-            text_label("Need more time?", "body-strong"),
-            wrap_row(*self.snooze_buttons.values()),
-            wrap_row(field("Custom minutes", self.custom_spin), self.custom_button, spacing=12),
+        custom_caption = text_label("Custom minutes", "secondary")
+        for widget in (custom_caption, self.custom_button):
+            widget.set_valign(Gtk.Align.CENTER)
+        custom_row = hbox(12, custom_caption, self.custom_spin, self.custom_button)
+        custom_row.set_halign(Gtk.Align.CENTER)
+        self.snooze_status = text_label("", "secondary", "small", xalign=0.5, wrap=True)
+        snooze_card = vbox(
+            12,
+            text_label("Need more time?", "body-strong", xalign=0.5),
+            snooze_row,
+            custom_row,
             self.snooze_status,
         )
-        snooze_section.add_css_class("form-section")
-        self.body.append(self.prompt_label)
-        self.body.append(self.complete_button)
-        self.body.append(snooze_section)
-        self.body.append(self.error_label)
-        self.body.append(self.quit_button)
+        snooze_card.add_css_class("option-section")
+
+        self.error_label = text_label("", "error-text", wrap=True, xalign=0.5)
+        self.error_label.set_visible(False)
+        self.quit_button = make_button("Quit Target", "ghost", "quiet-destructive", on_click=self.quit_target)
+        self.quit_button.set_halign(Gtk.Align.CENTER)
+
+        for child in (
+            self.heading_label,
+            session_card("Did you finish", self.prompt_label),
+            self.complete_button,
+            snooze_card,
+            self.error_label,
+            self.quit_button,
+        ):
+            self.body.append(child)
         self.refresh()
 
     def refresh(self) -> None:
@@ -66,9 +94,8 @@ class SubtaskGateDialog(AppDialog):
         if session is None:
             return
         state = session.state
-        self.prompt_label.set_text(
-            f'Batch {state.batch_index} complete. Did you finish "{session.batch.subtask_title}"?'
-        )
+        self.heading_label.set_text(f"Batch {state.batch_index} complete")
+        self.prompt_label.set_text(session.batch.subtask_title)
         if not state.is_final_batch:
             label = (
                 "Check Subtask & Start Break" if state.plan.break_ms else "Check Subtask & Start Next Batch"

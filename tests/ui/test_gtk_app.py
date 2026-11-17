@@ -13,6 +13,7 @@ import time
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest import mock
 
 import _bootstrap
 
@@ -31,6 +32,8 @@ from productime.ui.main_window import NAV_ITEMS
 from productime.ui.tokens import hex_to_rgb, load_tokens
 from productime.ui.views.alarm.alarm_ringing_dialog import LIMIT_REACHED as ALARM_LIMIT_REACHED
 from productime.ui.views.alarm.alarm_ringing_dialog import PASTE_BLOCKED, AlarmRingingDialog
+from productime.ui.views.target import vertical_timeline
+from productime.ui.views.target.next_batch_dialog import NextBatchDialog
 from productime.ui.views.target.subtask_gate_dialog import LIMIT_REACHED, SubtaskGateDialog
 from productime.ui.views.timer.timer_expired_dialog import TimerExpiredDialog
 from support import EXAMPLE_1, alarm_draft, make_wav, short_target, timer_draft
@@ -741,7 +744,8 @@ class TargetFlowTests(GtkAppTestCase):
         self.assertEqual(self.phase, TargetPhase.AWAITING_SUBTASK_GATE)
         self.assertTrue(self.audio_playing())
         self.assertEqual(self.app.audio.alert_sound_id, "bundled-community")
-        self.assertEqual(gate.prompt_label.get_text(), 'Batch 1 complete. Did you finish "First step"?')
+        self.assertEqual(gate.heading_label.get_text(), "Batch 1 complete")
+        self.assertEqual(gate.prompt_label.get_text(), "First step")
         self.assertEqual(text_of(gate.complete_button), "Check Subtask & Start Break")
         self.assertEqual(gate.snooze_status.get_text(), "1 of 1 snoozes left")
         self.assertEqual(sorted(gate.snooze_buttons), [1, 3, 5, 10])
@@ -771,7 +775,32 @@ class TargetFlowTests(GtkAppTestCase):
         self.assertIsNone(self.window.alert_dialog)
         self.assertEqual(self.app.audio.alert_state(), "null")
         self.assertEqual(focus.ring.tone, "rest")
-        self.assertFalse(focus.complete_button.is_sensitive())
+        self.assertTrue(focus.complete_button.is_sensitive())
+        self.assertEqual(focus.complete_button.get_tooltip_text(), "Start the next batch")
+
+    def test_gate_dialog_is_centred_with_one_even_row_of_snooze_choices(self):
+        self.start_short_target(snooze_limit=3)
+        self.advance(60)
+        gate = self.window.alert_dialog
+        body = gate.body
+        width = body.get_width()
+
+        self.assertEqual(gate.heading_label.get_xalign(), 0.5)
+        ok, primary = gate.complete_button.compute_bounds(body)
+        self.assertTrue(ok)
+        self.assertAlmostEqual(primary.get_width(), width, delta=1)
+        tops, widths = set(), set()
+        for button in gate.snooze_buttons.values():
+            ok, bounds = button.compute_bounds(body)
+            self.assertTrue(ok)
+            tops.add(round(bounds.get_y()))
+            widths.add(round(bounds.get_width()))
+            self.assertGreaterEqual(min(bounds.get_width(), bounds.get_height()), 44)
+        self.assertEqual(len(tops), 1, "snooze choices share one row")
+        self.assertLessEqual(max(widths) - min(widths), 1, "snooze choices share the width evenly")
+        ok, quit_bounds = gate.quit_button.compute_bounds(body)
+        self.assertTrue(ok)
+        self.assertGreater(quit_bounds.get_y(), max(tops))
 
     def test_custom_snooze_minutes_extend_the_batch(self):
         self.start_short_target(snooze_limit=None)
@@ -793,13 +822,17 @@ class TargetFlowTests(GtkAppTestCase):
         self.assertEqual(self.phase, TargetPhase.RESTING)
         self.assertFalse(focus.finish_button.get_visible())
         self.advance(60)
+        self.assertEqual(self.phase, TargetPhase.READY_FOR_NEXT)
+        self.click(self.window.alert_dialog.start_button)
         self.assertEqual((self.phase, self.scheduler.session.state.batch_index), (TargetPhase.WORKING, 2))
+        self.assertFalse(focus.complete_button.is_sensitive() and self.phase is TargetPhase.RESTING)
         self.advance(60)
         gate = self.window.alert_dialog
         self.assertEqual(text_of(gate.complete_button), "Check Subtask & Enter Final Rest")
         self.click(gate.complete_button)
 
         self.assertTrue(self.scheduler.session.state.in_final_rest)
+        self.assertFalse(focus.complete_button.is_sensitive(), "the final rest has no next batch")
         self.assertTrue(focus.finish_button.get_mapped())
         self.assertEqual(text_of(focus.finish_button), "Finish Target / Skip Final Rest")
         states = [entry[3] for entry in focus.timeline.entries()]
@@ -837,6 +870,114 @@ class TargetFlowTests(GtkAppTestCase):
         self.assertIsInstance(self.window.alert_dialog, SubtaskGateDialog)
         self.assertTrue(self.window.alert_dialog.complete_button.get_mapped())
         self.assertFalse(self.window.alert_bar.get_visible())
+
+    def rest_over(self, **overrides):
+        today, target = self.start_short_target(**overrides)
+        self.click(today.focus_view.complete_button)
+        self.advance(60)
+        return today, target
+
+    def test_a_finished_break_waits_for_the_user_with_a_looping_sound(self):
+        today, _target = self.rest_over(snooze_limit=1)
+
+        dialog = self.window.alert_dialog
+        self.assertIsInstance(dialog, NextBatchDialog)
+        self.assertEqual(self.phase, TargetPhase.READY_FOR_NEXT)
+        self.assertTrue(self.audio_playing())
+        self.assertEqual(dialog.heading_label.get_text(), "Break is over")
+        self.assertEqual(dialog.batch_label.get_text(), "Batch 2 of 2")
+        self.assertEqual(dialog.subtask_label.get_text(), "Second step")
+        self.assertEqual(text_of(dialog.start_button), "Start Batch 2")
+        self.assertEqual(dialog.extend_status.get_text(), "1 of 1 extensions left")
+        self.advance(10 * 60)
+        self.assertEqual(self.phase, TargetPhase.READY_FOR_NEXT)
+        focus = today.focus_view
+        self.assertEqual(focus.ring.text, "00:00")
+        self.assertIn("Batch 2", self.window.live_label.get_text())
+
+        self.click(dialog.start_button)
+
+        state = self.scheduler.session.state
+        self.assertEqual((state.phase, state.batch_index), (TargetPhase.WORKING, 2))
+        self.assertIsNone(self.window.alert_dialog)
+        self.assertEqual(self.app.audio.alert_state(), "null")
+        self.assertEqual(focus.ring.text, "01:00")
+
+    def test_resting_a_little_longer_counts_against_the_snooze_limit(self):
+        self.rest_over(snooze_limit=1)
+        dialog = self.window.alert_dialog
+
+        self.click(dialog.extend_button)
+
+        self.assertEqual(self.phase, TargetPhase.RESTING)
+        self.assertEqual(self.scheduler.session.state.remaining_ms, 5 * 60_000)
+        self.assertIsNone(self.window.alert_dialog)
+        self.advance(5 * 60)
+        dialog = self.window.alert_dialog
+        self.assertIsInstance(dialog, NextBatchDialog)
+        self.assertFalse(dialog.extend_button.is_sensitive())
+        self.assertEqual(dialog.extend_status.get_text(), "No more extensions. Start the next batch or quit.")
+
+    def test_escape_on_the_ready_prompt_keeps_the_sound_and_an_alert_bar(self):
+        today, _target = self.rest_over()
+
+        self.press_escape(self.window.alert_dialog)
+
+        self.assertTrue(self.window.alert_bar.get_mapped())
+        self.assertEqual(self.window.alert_bar_label.get_text(), "Break is over: Second step")
+        self.assertEqual(self.app.audio.alert_state(), "playing")
+        focus = today.focus_view
+        self.assertTrue(focus.ready_button.get_mapped())
+        self.assertEqual(text_of(focus.ready_button), "Start Batch 2")
+        self.click(focus.ready_button)
+        self.assertEqual(self.phase, TargetPhase.WORKING)
+        self.assertFalse(self.window.alert_bar.get_visible())
+
+    def test_ready_prompt_buttons_work_from_the_notification(self):
+        self.rest_over()
+        self.assertEqual(self.notifier.button_labels("target-ready"), ["Start Batch 2", "Rest 5 min"])
+
+        self.app.activate_action("ready-extend", GLib.Variant("i", 5))
+        pump(0.2)
+        self.assertEqual(self.phase, TargetPhase.RESTING)
+        self.advance(5 * 60)
+        self.app.activate_action("ready-start", None)
+        pump(0.2)
+
+        self.assertEqual((self.phase, self.scheduler.session.state.batch_index), (TargetPhase.WORKING, 2))
+
+    def test_checking_during_a_break_asks_before_ending_it(self):
+        today, _target = self.start_short_target()
+        focus = today.focus_view
+        self.click(focus.complete_button)
+        self.advance(20)
+
+        self.click(focus.complete_button)
+        confirm = self.window.last_confirm
+        self.assertEqual(confirm.get_heading(), "Start Batch 2 now?")
+        self.respond(confirm, "cancel")
+        self.assertEqual(self.phase, TargetPhase.RESTING)
+        self.assertEqual(self.scheduler.session.state.remaining_ms, 40_000)
+
+        self.click(focus.complete_button)
+        self.respond(self.window.last_confirm, "confirm")
+
+        self.assertEqual((self.phase, self.scheduler.session.state.batch_index), (TargetPhase.WORKING, 2))
+        self.assertEqual(focus.complete_button.get_tooltip_text(), "Complete subtask")
+
+    def test_timeline_spine_runs_unbroken_from_top_to_bottom(self):
+        today, _target = self.start_short_target()
+        nodes = today.focus_view.timeline.nodes
+        self.assertEqual(len(nodes), 4)
+
+        rows = today.focus_view.timeline.rows
+        previous = None
+        for node in nodes:
+            ok, bounds = node.compute_bounds(rows)
+            self.assertTrue(ok)
+            if previous is not None:
+                self.assertAlmostEqual(bounds.get_y(), previous.get_y() + previous.get_height(), delta=0.5)
+            previous = bounds
 
     def test_pause_resume_and_quit_keep_progress(self):
         today, target = self.start_short_target()
@@ -930,6 +1071,95 @@ class TargetFlowTests(GtkAppTestCase):
         self.assertEqual(today.hero_time.get_text(), "00:00:35")
         self.click(today.hero_button)
         self.assertEqual(self.phase, TargetPhase.WORKING)
+
+
+class TimelineClockTests(GtkAppTestCase):
+    """The timeline can show minutes from the start, or the local clock time of every block."""
+
+    def setUp(self):
+        super().setUp()
+        # The desktop's 12 or 24 hour setting differs per machine; these checks use 24 hours.
+        patcher = mock.patch.object(vertical_timeline, "desktop_uses_24h", lambda: True)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_create_page_shows_when_each_block_ends_by_the_clock(self):
+        _today, editor = self.open_editor("today")
+        editor.hours_spin.set_value(1)
+        self.choose(editor.pomodoro_group, "25/5")
+        timeline = editor.timeline
+        self.assertEqual(timeline.entries()[0][2], "00:00 -> 00:25")
+
+        self.choose(timeline.mode_group, "clock")
+
+        self.assertEqual(
+            [entry[2] for entry in timeline.entries()],
+            ["08:00 -> 08:25", "08:25 -> 08:30", "08:30 -> 08:55", "08:55 -> 09:00"],
+        )
+        self.assertEqual(timeline.total_text, "Total Timeline: 1h, ends 09:00")
+        self.assertEqual(self.repo.get_pref("timeline_clock", "0"), "1")
+
+    def test_clock_times_follow_the_live_session_and_the_saved_choice(self):
+        self.repo.set_pref("timeline_clock", "1")
+        target = self.repo.create_target(EXAMPLE_1)
+        today = self.window.view("today")
+        today.reload()
+        pump(0.2)
+        self.click(today.rows[target.id]["play"])
+        pump(0.2)
+        timeline = today.focus_view.timeline
+        self.assertEqual(timeline.mode_group.get_value(), "clock")
+
+        self.advance(10 * 60)
+        self.assertEqual(timeline.entries()[0][2], "08:00 -> 08:50")
+        self.click(today.focus_view.pause_button)
+        self.advance(5 * 60)
+
+        self.assertEqual(timeline.entries()[0][2], "08:05 -> 08:55", "a pause pushes the plan later")
+        self.choose(timeline.mode_group, "duration")
+        self.assertEqual(timeline.entries()[0][2], "00:00 -> 00:50")
+
+
+class FocusLayoutTests(GtkAppTestCase):
+    def focus(self):
+        target = self.repo.create_target(EXAMPLE_1)
+        self.scheduler.start_target(target.id)
+        today = self.window.view("today")
+        today.show_focus()
+        pump(0.4)
+        return today.focus_view
+
+    def test_the_ring_is_larger_than_before_in_a_normal_window(self):
+        focus = self.focus()
+
+        self.assertGreaterEqual(target_size(focus.ring)[0], 320)
+        self.assertGreaterEqual(focus.ring.text_px, 64)
+
+
+class FullScreenFocusTests(FocusLayoutTests):
+    window_size = (1900, 1040)
+
+    def test_a_full_screen_window_grows_the_ring_and_timeline(self):
+        focus = self.focus()
+
+        self.assertGreaterEqual(target_size(focus.ring)[0], 440)
+        self.assertGreaterEqual(focus.ring.text_px, 88)
+        self.assertTrue(self.window.has_css_class("large"))
+        ok, right = focus.right.compute_bounds(self.window)
+        self.assertTrue(ok)
+        self.assertGreater(right.get_width(), 600, "the timeline uses the extra width")
+
+
+class CompactFocusTests(FocusLayoutTests):
+    window_size = (420, 800)
+
+    def test_a_narrow_window_keeps_a_fitting_ring(self):
+        focus = self.focus()
+
+        width = target_size(focus.ring)[0]
+        self.assertGreaterEqual(width, 240)
+        self.assertLessEqual(width, 388)
+        self.assertLessEqual(self.window.get_content().measure(Gtk.Orientation.HORIZONTAL, -1)[0], 420)
 
 
 class AlarmFlowTests(GtkAppTestCase):
@@ -1083,6 +1313,67 @@ class AlarmFlowTests(GtkAppTestCase):
             self.assertEqual(len(lit), bars, level)
             self.assertIn(sample, [label.get_text() for label in self.labels_under(tile)])
             self.assertTrue(tile.has_css_class(f"option-{level}"), level)
+
+    def test_click_mission_has_presets_a_custom_count_and_hides_other_settings(self):
+        alarms, dialog = self.open_dialog()
+        sheet = self.open_sheet(dialog.mission_slot)
+        modes = sheet.groups["mission"]
+        self.assertEqual(
+            self.images_under(modes.button_for("click"))[0].get_icon_name(), "productime-click-symbolic"
+        )
+        self.assertIn("Click", modes.button_for("click").get_tooltip_text())
+
+        self.choose(modes, "click")
+
+        self.assertTrue(sheet.groups["clicks"].get_mapped())
+        self.assertFalse(sheet.groups["count"].get_mapped())
+        self.assertFalse(sheet.groups["difficulty"].get_mapped())
+        for value in (20, 30, 50, "custom"):
+            self.assertTrue(sheet.groups["clicks"].button_for(value).get_mapped(), value)
+        self.assertEqual(sheet.groups["clicks"].get_value(), 30)
+        self.assertFalse(sheet.clicks_spin.get_mapped())
+        self.choose(sheet.groups["clicks"], "custom")
+        self.assertTrue(sheet.clicks_spin.get_mapped())
+        sheet.clicks_spin.set_value(75)
+        self.assertEqual(sheet.section_values["clicks"].get_text(), "75 clicks")
+        self.click(sheet.save_button)
+        pump(0.2)
+
+        self.assertEqual(dialog.mission_slot.icon.get_icon_name(), "productime-click-symbolic")
+        self.assertEqual(dialog.mission_slot.caption.get_text(), "75")
+        self.assertIn("75 times", dialog.mission_slot.get_tooltip_text())
+        dialog.name_entry.set_text("Bangun")
+        self.click(dialog.save_button)
+        pump(0.3)
+        alarm = self.repo.list_alarms()[0]
+        self.assertEqual((alarm.mission_mode, alarm.mission_clicks), ("click", 75))
+        self.assertIn("Click 75x", alarms.cards[alarm.id]["badges"])
+
+    def test_click_mission_counts_presses_and_stops_the_alarm_at_the_target(self):
+        _alarm, dialog = self.ring(mission_mode="click", mission_clicks=10)
+        button = dialog.click_button
+        self.assertTrue(button.get_mapped())
+        self.assertGreaterEqual(min(target_size(button)), 120)
+        self.assertEqual(dialog.click_counter.get_text(), "0 / 10")
+        self.assertFalse(dialog.stop_button.get_visible())
+
+        for _ in range(9):
+            self.click(button)
+        self.assertEqual(dialog.click_counter.get_text(), "9 / 10")
+        self.assertEqual(self.app.audio.alert_state(), "playing")
+        self.click(button)
+
+        self.assertEqual(self.scheduler.ringing, [])
+        self.assertIsNone(self.window.alert_dialog)
+
+    def test_holding_a_key_on_the_click_button_counts_once(self):
+        _alarm, dialog = self.ring(mission_mode="click", mission_clicks=10)
+        guard = dialog.key_guard
+
+        self.assertFalse(guard.emit("key-pressed", Gdk.KEY_space, 65, 0))
+        self.assertTrue(guard.emit("key-pressed", Gdk.KEY_space, 65, 0), "auto-repeat is swallowed")
+        guard.emit("key-released", Gdk.KEY_space, 65, 0)
+        self.assertFalse(guard.emit("key-pressed", Gdk.KEY_Return, 36, 0))
 
     def test_snooze_sheet_shows_three_choices_and_more_options(self):
         _alarms, dialog = self.open_dialog()
@@ -1621,6 +1912,35 @@ class TimerFlowTests(GtkAppTestCase):
         self.assertEqual(picker.preview_button.get_icon_name(), "media-playback-start-symbolic")
         self.assertEqual(picker.preview_button.get_tooltip_text(), "Play preview")
         self.assertEqual(self.app.audio.preview_state(), "null")
+
+    def test_a_running_timer_reopens_paused_with_its_time_left_after_quitting(self):
+        timer = self.repo.create_timer(timer_draft(name="Laundry", duration_seconds=600))
+        timers = self.go("timer")
+        self.click(timers.cards[timer.id]["buttons"]["start"])
+        self.advance(125)
+        self.close_app()
+
+        self.launch()
+
+        timers = self.go("timer")
+        run = self.scheduler.timer_run(timer.id)
+        self.assertEqual((run.status, run.remaining_ms), ("paused", 475_000))
+        self.assertEqual(timers.cards[timer.id]["status"], "Paused")
+        self.assertTrue(timers.cards[timer.id]["buttons"]["resume"].get_mapped())
+
+    def test_a_break_reopens_paused_with_its_time_left_after_quitting(self):
+        target = self.repo.create_target(EXAMPLE_1)
+        self.scheduler.start_target(target.id)
+        self.scheduler.complete_subtask()
+        self.advance(4 * 60 + 30)
+        self.close_app()
+
+        self.launch()
+
+        state = self.scheduler.session.state
+        self.assertEqual((state.phase, state.remaining_ms), (TargetPhase.PAUSED_REST, 330_000))
+        today = self.window.view("today")
+        self.assertEqual(today.hero_time.get_text(), "00:05:30")
 
     def test_timer_needs_a_duration_and_a_name(self):
         _timers, dialog = self.open_dialog()

@@ -86,6 +86,7 @@ class SessionState:
     worked_ms: int = 0
     snoozed_ms: int = 0
     resume_phase: TargetPhase | None = None
+    rest_extensions: int = 0
 
     @property
     def batch_count(self) -> int:
@@ -115,6 +116,19 @@ class SessionState:
             return None
         return max(0, self.snooze_limit - self.snooze_count)
 
+    @property
+    def can_extend_rest(self) -> bool:
+        if self.phase is not TargetPhase.READY_FOR_NEXT:
+            return False
+        return self.snooze_limit is None or self.rest_extensions < self.snooze_limit
+
+    @property
+    def extensions_left(self) -> int | None:
+        """Rest extensions share the target's snooze limit but keep their own count per break."""
+        if self.snooze_limit is None:
+            return None
+        return max(0, self.snooze_limit - self.rest_extensions)
+
 
 def plans_from_slots(slots: Sequence[TimelineSlot]) -> tuple[BatchPlan, ...]:
     return tuple(
@@ -137,6 +151,7 @@ def _begin_batch(state: SessionState, batch_index: int, worked_ms: int = 0) -> S
         worked_ms=min(worked_ms, work_ms),
         snoozed_ms=0,
         resume_phase=None,
+        rest_extensions=0,
     )
 
 
@@ -173,7 +188,8 @@ def advance(state: SessionState, elapsed_ms: int) -> SessionState:
         if remaining == 0:
             if state.is_final_batch:
                 return replace(state, phase=TargetPhase.COMPLETED, phase_total_ms=0)
-            return _begin_batch(state, state.batch_index + 1)
+            # Work time must only start once the user is back, so the next batch waits.
+            return replace(state, phase=TargetPhase.READY_FOR_NEXT, phase_total_ms=0)
         return state
 
     if remaining == 0:
@@ -193,6 +209,7 @@ def complete_subtask(state: SessionState) -> SessionState:
             remaining_ms=break_ms,
             phase_total_ms=break_ms,
             resume_phase=None,
+            rest_extensions=0,
         )
     if state.is_final_batch:
         return replace(state, phase=TargetPhase.COMPLETED, remaining_ms=0, phase_total_ms=0)
@@ -237,3 +254,44 @@ def finish_target(state: SessionState) -> SessionState:
     if not state.in_final_rest:
         raise InvalidTransition("The target can only be finished during its final rest.")
     return replace(state, phase=TargetPhase.COMPLETED, remaining_ms=0, phase_total_ms=0)
+
+
+def start_next_batch(state: SessionState) -> SessionState:
+    """Begin the next batch after a break ran out, or end a break early on the user's request."""
+    if state.phase not in (TargetPhase.READY_FOR_NEXT, TargetPhase.RESTING, TargetPhase.PAUSED_REST):
+        raise InvalidTransition(f"The next batch cannot start while {state.phase.value}.")
+    if state.is_final_batch:
+        raise InvalidTransition("This is the final batch. Finish the target instead.")
+    return _begin_batch(state, state.batch_index + 1)
+
+
+def extend_rest(state: SessionState, minutes: int) -> SessionState:
+    if state.phase is not TargetPhase.READY_FOR_NEXT:
+        raise InvalidTransition("A rest can only be extended once it is over.")
+    if minutes < 1:
+        raise InvalidTransition("A rest extension needs at least one minute.")
+    if not state.can_extend_rest:
+        raise InvalidTransition("Snooze limit reached. Start the next batch or quit the target.")
+    duration = minutes * MS_PER_MINUTE
+    return replace(
+        state,
+        phase=TargetPhase.RESTING,
+        remaining_ms=duration,
+        phase_total_ms=duration,
+        rest_extensions=state.rest_extensions + 1,
+    )
+
+
+def suspend(state: SessionState) -> SessionState:
+    """The state a session reopens in after the app was closed: exact time left, nothing counting.
+
+    A waiting gate reopens paused so launching the app is silent; resuming returns to the gate.
+    Waiting to start reopens as the next batch, paused at its full length.
+    """
+    if state.phase in (TargetPhase.WORKING, TargetPhase.SNOOZING, TargetPhase.AWAITING_SUBTASK_GATE):
+        return replace(state, phase=TargetPhase.PAUSED_WORK, resume_phase=state.phase)
+    if state.phase is TargetPhase.RESTING:
+        return replace(state, phase=TargetPhase.PAUSED_REST)
+    if state.phase is TargetPhase.READY_FOR_NEXT:
+        return pause(_begin_batch(state, state.batch_index + 1))
+    return state

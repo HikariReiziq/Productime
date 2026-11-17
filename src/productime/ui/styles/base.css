@@ -454,7 +454,9 @@ spinbutton.vertical.big > text {
 
 /* Timeline */
 
-.timeline-row { padding: 4px 10px 4px 0; border-radius: 16px; }
+/* No vertical padding outside the node: each spine segment must touch the next row's. */
+.timeline-row { padding: 0 10px 0 0; border-radius: 16px; }
+.timeline-texts { margin: 5px 0; }
 .timeline-row.active { background-color: @bg_surface_elevated; }
 .timeline-title { font-weight: 500; }
 .timeline-range { font-size: 12px; color: @text_secondary; }
@@ -656,3 +658,62 @@ button.mission-slot.filled {
 .choice-group.tiles button.option-easy:checked { background-color: @success_bg; color: @success_text; }
 .choice-group.tiles button.option-medium:checked { background-color: @rest_bg; color: @rest_text; }
 .choice-group.tiles button.option-hard:checked { background-color: @alert_bg; color: @alert_text; }
+
+/* Focus clock sizes: CSS sets the ring's size, and its digits scale with it. */
+.focus-ring { min-width: 320px; min-height: 320px; }
+.productime.compact .focus-ring { min-width: 260px; min-height: 260px; }
+.productime.large .focus-ring { min-width: 460px; min-height: 460px; }
+
+.productime.large .timeline-title { font-size: 16px; }
+.productime.large .timeline-range { font-size: 13px; }
+.productime.large .timeline-texts { margin: 8px 0; }
+
+/* Session alerts: batch complete and break over. */
+.alert-heading { font-size: 24px; font-weight: 600; }
+.session-card { padding: 16px 18px; }
+
+button.alert-primary {
+  min-height: 52px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+button.ghost.quiet-destructive { color: @alert_text; }
+button.ghost.quiet-destructive:hover { background-color: @alert_bg; color: @alert_text; }
+
+/* Click mission: one big round target and a plain progress bar. */
+button.click-target {
+  min-width: 132px;
+  min-height: 132px;
+  padding: 0;
+  border-radius: 9999px;
+  border: none;
+  box-shadow: none;
+  background-image: none;
+  background-color: @accent;
+  color: @on_accent;
+}
+
+button.click-target:hover { box-shadow: inset 0 0 0 100px alpha(white, 0.10); }
+button.click-target:active { box-shadow: inset 0 0 0 100px alpha(black, 0.16); }
+
+.click-counter { font-size: 28px; font-weight: 300; }
+
+progressbar.click-progress > trough {
+  min-height: 8px;
+  border-radius: 9999px;
+  background-color: @bg_track;
+}
+
+progressbar.click-progress > trough > progress {
+  min-height: 8px;
+  border-radius: 9999px;
+  background-color: @control_fill;
+}
+
+/* Alarm list: one card per alarm, quieter when it is switched off. */
+.alarm-card { padding: 16px 18px 10px 20px; }
+.alarm-card .card-title { margin-bottom: 2px; }
+.alarm-card.off .alarm-time,
+.alarm-card.off .card-title { color: @text_secondary; }
+.alarm-card .day-pill { min-width: 26px; padding: 2px 0; }

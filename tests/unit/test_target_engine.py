@@ -1,9 +1,10 @@
 import unittest
+from datetime import datetime
 
 import _bootstrap  # noqa: F401
 
 from productime.domain import target_engine as engine
-from productime.domain.formatters import format_hm, format_range
+from productime.domain.formatters import format_clock_range, format_hm, format_range
 from productime.domain.models import TargetConfig, TargetPhase
 
 MIN = 60_000
@@ -121,6 +122,15 @@ class TimelineProjectionTests(unittest.TestCase):
         self.assertEqual([s.break_minutes for s in slots], [20, 20])
 
 
+class ClockRangeTests(unittest.TestCase):
+    def test_clock_ranges_follow_the_desktop_clock_format(self):
+        start, end = datetime(2026, 11, 17, 13, 5), datetime(2026, 11, 17, 13, 55)
+
+        self.assertEqual(format_clock_range(start, end), "13:05 -> 13:55")
+        self.assertEqual(format_clock_range(start, end, twenty_four=False), "1:05 PM -> 1:55 PM")
+        self.assertEqual(format_clock_range(datetime(2026, 1, 1, 0, 7), end, False), "12:07 AM -> 1:55 PM")
+
+
 class SubtaskGateTests(unittest.TestCase):
     def test_work_expiry_waits_at_the_gate_instead_of_resting(self):
         state = engine.advance(session(EXAMPLE_1), 50 * MIN)
@@ -151,18 +161,21 @@ class SubtaskGateTests(unittest.TestCase):
 
         self.assertEqual(state.phase, TargetPhase.RESTING)
 
-    def test_rest_expiry_starts_the_next_batch(self):
+    def test_rest_expiry_waits_for_the_user_before_the_next_batch(self):
         state = engine.complete_subtask(session(EXAMPLE_1))
 
         state = engine.advance(state, 10 * MIN)
 
+        self.assertEqual((state.phase, state.batch_index), (TargetPhase.READY_FOR_NEXT, 1))
+        self.assertEqual(engine.advance(state, 60 * MIN), state)
+        state = engine.start_next_batch(state)
         self.assertEqual((state.phase, state.batch_index), (TargetPhase.WORKING, 2))
-        self.assertEqual((state.worked_ms, state.snooze_count), (0, 0))
+        self.assertEqual((state.worked_ms, state.snooze_count, state.remaining_ms), (0, 0, 50 * MIN))
 
     def test_third_batch_gets_the_long_rest(self):
         state = session(EXAMPLE_1)
         for _ in range(2):
-            state = engine.advance(engine.complete_subtask(state), 10 * MIN)
+            state = engine.start_next_batch(engine.advance(engine.complete_subtask(state), 10 * MIN))
 
         state = engine.complete_subtask(state)
 
@@ -215,7 +228,7 @@ class SubtaskGateTests(unittest.TestCase):
         state = engine.advance(engine.snooze(state, 1), MIN)
 
         state = engine.advance(engine.complete_subtask(state), 10 * MIN)
-        state = engine.advance(state, 50 * MIN)
+        state = engine.advance(engine.start_next_batch(state), 50 * MIN)
 
         self.assertTrue(state.can_snooze)
 
@@ -252,12 +265,128 @@ class SubtaskGateTests(unittest.TestCase):
         self.assertEqual((state.batch_index, state.remaining_ms), (2, 30 * MIN))
 
 
+class NextBatchTests(unittest.TestCase):
+    def resting(self, snooze_limit=None):
+        return engine.complete_subtask(session(EXAMPLE_1, snooze_limit))
+
+    def test_checking_during_a_rest_skips_the_rest_of_the_break(self):
+        for state in (self.resting(), engine.pause(self.resting())):
+            state = engine.advance(state, 3 * MIN)
+
+            state = engine.start_next_batch(state)
+
+            self.assertEqual(
+                (state.phase, state.batch_index, state.remaining_ms), (TargetPhase.WORKING, 2, 50 * MIN)
+            )
+
+    def test_next_batch_cannot_start_from_work_or_the_gate(self):
+        working = session(EXAMPLE_1)
+        for state in (working, engine.pause(working), engine.advance(working, 50 * MIN)):
+            with self.assertRaises(engine.InvalidTransition):
+                engine.start_next_batch(state)
+
+    def test_extending_the_rest_counts_against_the_snooze_limit(self):
+        ready = engine.advance(self.resting(snooze_limit=2), 10 * MIN)
+        self.assertEqual((ready.extensions_left, ready.can_extend_rest), (2, True))
+
+        state = engine.extend_rest(ready, 5)
+        self.assertEqual(
+            (state.phase, state.remaining_ms, state.phase_total_ms), (TargetPhase.RESTING, 5 * MIN, 5 * MIN)
+        )
+        state = engine.extend_rest(engine.advance(state, 5 * MIN), 5)
+        state = engine.advance(state, 5 * MIN)
+
+        self.assertEqual(
+            (state.phase, state.extensions_left, state.can_extend_rest),
+            (TargetPhase.READY_FOR_NEXT, 0, False),
+        )
+        with self.assertRaises(engine.InvalidTransition):
+            engine.extend_rest(state, 5)
+
+    def test_unlimited_snooze_allows_unlimited_extensions(self):
+        state = engine.advance(self.resting(), 10 * MIN)
+        for _ in range(12):
+            state = engine.advance(engine.extend_rest(state, 5), 5 * MIN)
+
+        self.assertTrue(state.can_extend_rest)
+        self.assertIsNone(state.extensions_left)
+
+    def test_rest_can_only_be_extended_once_it_is_over(self):
+        with self.assertRaises(engine.InvalidTransition):
+            engine.extend_rest(self.resting(), 5)
+        with self.assertRaises(engine.InvalidTransition):
+            engine.extend_rest(engine.advance(self.resting(), 10 * MIN), 0)
+
+    def test_extensions_start_again_at_the_next_break(self):
+        state = engine.extend_rest(engine.advance(self.resting(snooze_limit=1), 10 * MIN), 5)
+        state = engine.start_next_batch(state)
+
+        state = engine.advance(engine.complete_subtask(state), 10 * MIN)
+
+        self.assertEqual(state.extensions_left, 1)
+
+    def test_waiting_to_start_cannot_be_paused_or_checked_off(self):
+        ready = engine.advance(self.resting(), 10 * MIN)
+        for event in (engine.pause, engine.complete_subtask, engine.finish_target):
+            with self.assertRaises(engine.InvalidTransition):
+                event(ready)
+
+
+class SuspendForRestartTests(unittest.TestCase):
+    """What a session looks like when the app reopens: everything exact, nothing counting."""
+
+    def test_work_and_snooze_keep_their_exact_remaining_time(self):
+        working = engine.advance(session(EXAMPLE_1), 12 * MIN + 345)
+        snoozing = engine.advance(engine.snooze(engine.advance(working, 38 * MIN - 345), 10), 4 * MIN)
+
+        for state, resume_phase, remaining in (
+            (working, TargetPhase.WORKING, 38 * MIN - 345),
+            (snoozing, TargetPhase.SNOOZING, 6 * MIN),
+        ):
+            frozen = engine.suspend(state)
+            self.assertEqual((frozen.phase, frozen.remaining_ms), (TargetPhase.PAUSED_WORK, remaining))
+            self.assertEqual(engine.resume(frozen).phase, resume_phase)
+
+    def test_a_waiting_gate_reopens_quietly_and_returns_to_the_gate(self):
+        gate = engine.advance(session(EXAMPLE_1), 50 * MIN)
+
+        frozen = engine.suspend(gate)
+
+        self.assertEqual(frozen.phase, TargetPhase.PAUSED_WORK)
+        self.assertEqual(engine.resume(frozen).phase, TargetPhase.AWAITING_SUBTASK_GATE)
+        self.assertEqual(engine.complete_subtask(frozen).phase, TargetPhase.RESTING)
+
+    def test_a_rest_keeps_its_remaining_time(self):
+        state = engine.advance(engine.complete_subtask(session(EXAMPLE_1)), 4 * MIN)
+
+        frozen = engine.suspend(state)
+
+        self.assertEqual((frozen.phase, frozen.remaining_ms), (TargetPhase.PAUSED_REST, 6 * MIN))
+
+    def test_waiting_to_start_reopens_as_the_next_batch_paused(self):
+        ready = engine.advance(engine.complete_subtask(session(EXAMPLE_1)), 10 * MIN)
+
+        frozen = engine.suspend(ready)
+
+        self.assertEqual(
+            (frozen.phase, frozen.batch_index, frozen.remaining_ms), (TargetPhase.PAUSED_WORK, 2, 50 * MIN)
+        )
+
+    def test_paused_and_completed_sessions_stay_as_they_are(self):
+        paused = engine.pause(session(EXAMPLE_1))
+        self.assertEqual(engine.suspend(paused), paused)
+
+
 class FinalBatchTests(unittest.TestCase):
     def final_batch_state(self, cfg=EXAMPLE_1):
         state = session(cfg)
         for _ in range(state.batch_count - 1):
             state = engine.complete_subtask(state)
-            state = engine.advance(state, state.remaining_ms)
+            state = (
+                engine.start_next_batch(engine.advance(state, state.remaining_ms))
+                if state.phase is TargetPhase.RESTING
+                else state
+            )
         return state
 
     def test_final_check_off_enters_the_scheduled_final_rest(self):
@@ -287,6 +416,10 @@ class FinalBatchTests(unittest.TestCase):
             engine.finish_target(engine.complete_subtask(session(EXAMPLE_1)))
         with self.assertRaises(engine.InvalidTransition):
             engine.finish_target(self.final_batch_state())
+
+    def test_the_final_rest_cannot_be_skipped_into_a_batch_that_does_not_exist(self):
+        with self.assertRaises(engine.InvalidTransition):
+            engine.start_next_batch(engine.complete_subtask(self.final_batch_state()))
 
     def test_completed_session_rejects_further_events(self):
         done = engine.finish_target(engine.complete_subtask(self.final_batch_state()))
